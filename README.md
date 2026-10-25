@@ -6,11 +6,17 @@ run commands and work with files on it. It speaks the protocol of the Grok Bot
 
 ## Installation
 
-Download the linux/amd64 or linux/arm64 archive from the Releases page and
-put `grokbot-cli` on your `PATH`. To build from source, see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+```sh
+curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-cli/main/install.sh | sh
+```
 
-Requirements on the computer:
+The script installs the latest release to `/usr/local/bin` or, without sudo,
+to `~/.local/bin`. Set `GROKBOT_VERSION` or `GROKBOT_INSTALL_DIR` to change
+that. You can also download the binary from
+[Releases](https://github.com/exa-pub/grokbot-cli/releases) or
+[build from source](CONTRIBUTING.md).
+
+Requirements:
 
 - bash. If `$SHELL` points to zsh, the agent's commands run in zsh.
 - `rg` (ripgrep), optional. With it, directory listings respect `.gitignore`.
