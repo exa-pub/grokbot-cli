@@ -86,7 +86,7 @@ func (p *Policy) Allow(ctx context.Context, action string, server, approved bool
 	if ok, err := p.decide(server, approved); ok {
 		return err
 	}
-	if p.In == nil || !term.IsTerminal(int(p.In.Fd())) {
+	if !interactive(p.In) {
 		return ErrRefused
 	}
 	// Wait for the terminal without ignoring cancellation, so a queued request
@@ -104,6 +104,9 @@ func (p *Policy) Allow(ctx context.Context, action string, server, approved bool
 	// Another prompt may have switched the mode to "always" while we waited.
 	if ok, err := p.decide(server, approved); ok {
 		return err
+	}
+	if !interactive(p.In) {
+		return ErrRefused
 	}
 	out := p.Out
 	if out == nil {
@@ -137,6 +140,26 @@ func (p *Policy) promptSlot() chan struct{} {
 		p.prompt = make(chan struct{}, 1)
 	}
 	return p.prompt
+}
+
+// interactive reports whether f is a terminal the CLI may prompt on. If it is
+// the controlling terminal, the CLI must be in its foreground process group:
+// reading or flushing from the background (connect &) stops the whole process
+// with SIGTTIN or SIGTTOU. Other terminals report ENOTTY and are not subject
+// to job control.
+func interactive(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	fd := int(f.Fd())
+	if !term.IsTerminal(fd) {
+		return false
+	}
+	pgrp, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
+	if errors.Is(err, unix.ENOTTY) {
+		return true
+	}
+	return err == nil && pgrp == unix.Getpgrp()
 }
 
 // flushInput discards pending terminal input; it is a no-op for non-terminals.

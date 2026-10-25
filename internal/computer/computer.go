@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand/v2"
 	"slices"
+	"strconv"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -15,6 +16,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/exa-pub/grokbot-cli/internal/auth"
 	"github.com/exa-pub/grokbot-cli/internal/config"
 	"github.com/exa-pub/grokbot-cli/internal/executor"
 	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
@@ -50,9 +52,29 @@ const (
 	shutdownGrace     = 8 * time.Second
 	// Part of shutdownGrace kept for the final submit after waiting for workers.
 	finalFlushGrace = 2 * time.Second
+
+	// Failed credential issues are retried like the desktop's gJe:
+	// 30 s · 2^(n−1) up to 10 min, or Retry-After up to 15 min, plus jitter.
+	issueBackoff    = 30 * time.Second
+	maxIssueBackoff = 10 * time.Minute
+	maxRetryAfter   = 15 * time.Minute
 )
 
+// channelRetry is how long the watch stays down after the server rejected the
+// credential, as the desktop daemon's channelRetry. A variable so tests can
+// shorten it.
+var channelRetry = 10 * time.Second
+
 var errBacklogFull = errors.New("response backlog full")
+
+// Reasons given to the agent for requests that do not run, in the desktop's
+// words.
+//
+//nolint:revive,staticcheck // user-facing sentences
+var (
+	errBusy    = errors.New("The user's computer is busy with other requests right now; try again shortly.")
+	errStopped = errors.New("The user's computer stopped serving requests before this one started. Retry it once the computer is back.")
+)
 
 type (
 	requestFrame  = aiserverv1.GrokBotUserComputerRequestFrame
@@ -102,7 +124,11 @@ func (pv *Provider) issue(ctx context.Context) (config.Computer, error) {
 	if c.Credential == "" || c.ExpiresAtMS <= pv.now().UnixMilli() {
 		return c, errors.New("server returned invalid computer credential")
 	}
-	return c, pv.Store.Save("computer", c)
+	// The file only caches the credential across restarts.
+	if err := pv.Store.Save("computer", c); err != nil {
+		log.Printf("cache computer credential: %v", err)
+	}
+	return c, nil
 }
 
 func (pv *Provider) hello(c config.Computer, standing string) *aiserverv1.GrokBotUserComputerHello {
@@ -125,6 +151,9 @@ func (pv *Provider) hello(c config.Computer, standing string) *aiserverv1.GrokBo
 type task struct {
 	frame  *requestFrame
 	cancel context.CancelFunc // nil until the task starts
+	// server is the credential's server-authoritative mode when the request
+	// arrived; the request's approval flags are only meaningful under it.
+	server bool
 }
 
 // submitted is the outcome of a submit RPC run off the Run goroutine.
@@ -138,7 +167,14 @@ type submitted struct {
 // polled is the outcome of a poll RPC run off the Run goroutine.
 type polled struct {
 	credential string
+	server     bool // the credential's ServerAuthoritative
 	requests   []*aiserverv1.GrokBotUserComputerQueuedRequest
+	err        error
+}
+
+// issued is the outcome of a credential issue run off the Run goroutine.
+type issued struct {
+	credential config.Computer
 	err        error
 }
 
@@ -192,6 +228,7 @@ type session struct {
 	// on these channels, buffered so an abandoned RPC never blocks.
 	submitted chan submitted
 	polled    chan polled
+	issued    chan issued
 
 	tasks    map[string]*task
 	backlog  []string
@@ -207,9 +244,14 @@ type session struct {
 	credential config.Computer
 	// issuedAt is the local time the credential was issued; zero if unknown.
 	issuedAt time.Time
-	// Failed credential renewals are retried with their own backoff.
-	nextRenew    time.Time
-	renewBackoff time.Duration
+	// proven is set once the watch stream connected with the credential, as in
+	// the desktop; until then a rejection counts as a failed issue.
+	proven bool
+	// Failed issues, and credentials rejected before they were proven, are
+	// retried after nextRenew.
+	issuing       bool
+	issueFailures int
+	nextRenew     time.Time
 
 	watchCancel    context.CancelFunc
 	generation     int
@@ -231,20 +273,20 @@ type session struct {
 
 func newSession(ctx context.Context, pv *Provider) *session {
 	s := &session{
-		pv:           pv,
-		replies:      make(chan *responseFrame, submitBatch),
-		done:         make(chan string, maxActive),
-		events:       make(chan watched, 16),
-		submitted:    make(chan submitted, 1),
-		polled:       make(chan polled, 1),
-		tasks:        map[string]*task{},
-		seen:         newDedup(),
-		requests:     newDedup(),
-		canceled:     newDedup(),
-		backoff:      minBackoff,
-		renewBackoff: minBackoff,
-		pollBackoff:  minBackoff,
-		credential:   pv.cachedCredential(),
+		pv:          pv,
+		replies:     make(chan *responseFrame, submitBatch),
+		done:        make(chan string, maxActive),
+		events:      make(chan watched, 16),
+		submitted:   make(chan submitted, 1),
+		polled:      make(chan polled, 1),
+		issued:      make(chan issued, 1),
+		tasks:       map[string]*task{},
+		seen:        newDedup(),
+		requests:    newDedup(),
+		canceled:    newDedup(),
+		backoff:     minBackoff,
+		pollBackoff: minBackoff,
+		credential:  pv.cachedCredential(),
 	}
 	s.life, s.stopLife = context.WithCancel(context.Background())
 	s.work, s.stopWork = context.WithCancel(ctx)
@@ -383,6 +425,8 @@ func (s *session) run(ctx context.Context) error {
 			err = s.onSubmitted(r)
 		case r := <-s.polled:
 			s.onPolled(r)
+		case r := <-s.issued:
+			err = s.onIssued(r)
 		case id := <-s.done:
 			s.finish(id)
 			s.startJobs()
@@ -452,13 +496,15 @@ func (s *session) onEvent(ev watched) {
 		s.needPoll = s.needPoll || hasWork(ev.event)
 		if ev.event.GetConnected() != nil {
 			s.watchConnected = true
+			s.proven = true
+			s.issueFailures = 0
 			log.Printf("connected as %s (%s)", s.pv.Machine.Label, s.pv.Machine.MachineID)
 		}
 		return
 	}
 	s.watchAlive = false
 	s.invalidate(ev.err)
-	s.nextDial = s.now().Add(s.backoff + s.jitter(s.backoff))
+	s.delayDial(s.backoff + s.jitter(s.backoff))
 	s.increaseBackoff()
 	if ev.err != nil {
 		log.Printf("watch: %v; reconnecting", ev.err)
@@ -508,9 +554,16 @@ func (s *session) increaseBackoff() {
 	s.backoff = min(maxBackoff, s.backoff*2)
 }
 
-func (s *session) onTick(ctx context.Context) error {
-	if ready, err := s.ensureCredential(ctx); !ready {
-		return err
+// delayDial postpones the next watch dial by at least d.
+func (s *session) delayDial(d time.Duration) {
+	if at := s.now().Add(d); at.After(s.nextDial) {
+		s.nextDial = at
+	}
+}
+
+func (s *session) onTick(context.Context) error {
+	if !s.ensureCredential() {
+		return nil
 	}
 	// Events that queued up while Run was busy prove the stream is alive.
 	s.drainEvents()
@@ -577,40 +630,77 @@ func (s *session) renewAt() time.Time {
 	return expiresAt.Add(-margin)
 }
 
-// ensureCredential issues a new credential when the current one is missing or
-// due for renewal. It reports whether a usable credential is available; a
-// failed renewal keeps using the old credential until it expires.
-func (s *session) ensureCredential(ctx context.Context) (bool, error) {
+// ensureCredential starts issuing a new credential when the current one is
+// missing or due for renewal. It reports whether a usable credential is
+// available; while an issue is in flight or backing off, the old credential
+// keeps serving until it expires.
+func (s *session) ensureCredential() bool {
 	now := s.now()
 	if s.credential.Credential != "" && now.Before(s.renewAt()) {
-		return true, nil
+		return true
 	}
 	usable := s.credential.Credential != "" && now.Before(time.UnixMilli(s.credential.ExpiresAtMS))
-	select {
-	case <-ctx.Done():
-		return false, nil // shutting down
-	default:
+	if !s.issuing && s.work.Err() == nil && !now.Before(s.nextRenew) {
+		s.startIssue()
 	}
-	if now.Before(s.nextRenew) {
-		return usable, nil
-	}
-	c, err := s.pv.issue(ctx)
-	switch {
+	return usable
+}
+
+// startIssue issues a credential in the background. Shutdown abandons it.
+func (s *session) startIssue() {
+	s.issuing = true
+	go func() {
+		c, err := s.pv.issue(s.work)
+		s.issued <- issued{credential: c, err: err}
+	}()
+}
+
+// onIssued applies an issue result. Without a session or a registration no
+// credential can ever be issued, so those errors end Run.
+func (s *session) onIssued(r issued) error {
+	s.issuing = false
+	switch err := r.err; {
 	case removedComputer(err):
-		return false, fmt.Errorf("computer registration refused: %w", err)
+		return fmt.Errorf("computer registration refused: %w", err)
+	case errors.Is(err, auth.ErrLogout), errors.Is(err, auth.ErrNotLoggedIn):
+		return err
 	case err != nil:
-		log.Printf("credential: %v", err)
-		s.nextRenew = s.now().Add(s.renewBackoff)
-		s.renewBackoff = min(maxBackoff, s.renewBackoff*2)
-		return usable, nil
+		if s.work.Err() == nil {
+			log.Printf("credential: %v", err)
+		}
+		s.failIssue(retryAfter(err))
+		return nil
 	}
-	s.credential = c
-	s.issuedAt = now
+	s.credential = r.credential
+	s.issuedAt = s.now()
+	s.proven = false
 	s.nextRenew = time.Time{}
-	s.renewBackoff = minBackoff
-	s.startWatch()
+	// The next tick dials with the new credential once nextDial allows.
+	s.stopWatch()
 	s.needPoll = true
-	return true, nil
+	return nil
+}
+
+// failIssue schedules the next issue after a failure, like the desktop's gJe.
+func (s *session) failIssue(retryAfter time.Duration) {
+	s.issueFailures++
+	d := min(maxIssueBackoff, issueBackoff<<min(s.issueFailures-1, 10))
+	d = max(d, min(retryAfter, maxRetryAfter))
+	s.nextRenew = s.now().Add(d + s.jitter(d/2))
+}
+
+// retryAfter returns the delay the server asked for in a Retry-After header
+// of err, in seconds; zero if none.
+func retryAfter(err error) time.Duration {
+	var ce *connect.Error
+	if !errors.As(err, &ce) {
+		return 0
+	}
+	n, perr := strconv.Atoi(ce.Meta().Get("Retry-After"))
+	if perr != nil || n <= 0 {
+		return 0
+	}
+	return time.Duration(n) * time.Second
 }
 
 // startWatch replaces the watch stream with a new one for the current credential.
@@ -662,13 +752,19 @@ func (s *session) startJobs() {
 		if t == nil {
 			continue // canceled while waiting
 		}
+		if s.credential.Credential == "" || s.credential.ServerAuthoritative != t.server {
+			// The permission mode the request was made under is gone; like the
+			// desktop, which recreates its provider then, do not run it.
+			delete(s.tasks, id)
+			s.reject(t.frame, errStopped)
+			continue
+		}
 		ctx, cancel := context.WithCancel(s.work)
 		t.cancel = cancel
 		s.active++
-		server := s.credential.ServerAuthoritative
 		go func() {
 			defer cancel()
-			if err := s.pv.Executor.Handle(ctx, t.frame, server, s.sink); err != nil {
+			if err := s.pv.Executor.Handle(ctx, t.frame, t.server, s.sink); err != nil {
 				log.Printf("request %s: %v", id, err)
 			}
 			select {
@@ -692,15 +788,21 @@ func (s *session) invalidate(err error) {
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		return
 	}
+	if !s.proven {
+		// A credential rejected before it ever connected counts as a failed
+		// issue, so a server that keeps rejecting it is not hammered.
+		s.failIssue(retryAfter(err))
+	}
 	s.credential = config.Computer{}
 	s.issuedAt = time.Time{}
+	s.proven = false
 	if s.pv.Store != nil {
 		if err := s.pv.Store.Save("computer", s.credential); err != nil {
 			log.Printf("forget computer credential: %v", err)
 		}
 	}
 	s.stopWatch()
-	s.nextDial = s.now()
+	s.delayDial(channelRetry)
 }
 
 // submit delivers pending frames, retrying briefly on failure.
@@ -824,7 +926,7 @@ func (s *session) startPoll() {
 	}
 	s.needPoll = false
 	s.polling = true
-	credential := s.credential.Credential
+	credential, server := s.credential.Credential, s.credential.ServerAuthoritative
 	req := &aiserverv1.PollGrokBotUserComputerRequestsRequest{
 		MachineId:  s.pv.Machine.MachineID,
 		Credential: credential,
@@ -835,7 +937,7 @@ func (s *session) startPoll() {
 		ctx, cancel := rpcContext(s.work)
 		defer cancel()
 		r, err := s.pv.Channel.PollGrokBotUserComputerRequests(ctx, connect.NewRequest(req))
-		result := polled{credential: credential, err: err}
+		result := polled{credential: credential, server: server, err: err}
 		if err == nil {
 			result.requests = r.Msg.Requests
 		}
@@ -862,7 +964,7 @@ func (s *session) onPolled(r polled) {
 	for _, q := range r.requests {
 		s.acks = append(s.acks, q.Id)
 		if s.seen.add(q.Id) && q.Frame != nil {
-			s.accept(q.Frame)
+			s.accept(q.Frame, r.server)
 		}
 	}
 	// Poll again right away to deliver the acks and drain the queue.
@@ -871,7 +973,7 @@ func (s *session) onPolled(r polled) {
 	}
 }
 
-func (s *session) accept(f *requestFrame) {
+func (s *session) accept(f *requestFrame, server bool) {
 	if s.pv.Debug {
 		if raw, err := protojson.Marshal(f); err == nil {
 			log.Printf("request JSON: %s", raw)
@@ -885,10 +987,10 @@ func (s *session) accept(f *requestFrame) {
 		// Already queued or running.
 	case s.active >= maxActive && len(s.backlog) >= maxBacklog:
 		s.requests.add(f.RequestId)
-		s.reject(f, errors.New("too many in-flight requests"))
+		s.reject(f, errBusy)
 	default:
 		s.requests.add(f.RequestId)
-		s.tasks[f.RequestId] = &task{frame: f}
+		s.tasks[f.RequestId] = &task{frame: f, server: server}
 		s.backlog = append(s.backlog, f.RequestId)
 		s.startJobs()
 	}

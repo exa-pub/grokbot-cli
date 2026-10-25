@@ -259,10 +259,10 @@ func (s *TokenSource) Token(ctx context.Context, force bool) (string, error) {
 		}
 	}
 	if id.RefreshToken == "" {
-		return "", errors.New("not logged in; run grokbot-cli login")
+		return "", ErrNotLoggedIn
 	}
 	next, err := s.refresh(ctx, id.RefreshToken)
-	if errors.Is(err, errLogout) {
+	if errors.Is(err, ErrLogout) {
 		s.Identity = config.Auth{}
 		// Only wipe auth.json if it still holds the rejected session.
 		if onDisk == id.RefreshToken {
@@ -324,7 +324,11 @@ func (s *TokenSource) reload() (onDisk string, persist bool) {
 	return disk.RefreshToken, true
 }
 
-var errLogout = errors.New("session revoked; run grokbot-cli login")
+// Errors after which no token can be obtained until the user logs in again.
+var (
+	ErrLogout      = errors.New("session revoked; run grokbot-cli login")
+	ErrNotLoggedIn = errors.New("not logged in; run grokbot-cli login")
+)
 
 // refresh exchanges a refresh token for new tokens. The refresh token in the
 // result is empty if the server did not rotate it.
@@ -355,7 +359,7 @@ func (s *TokenSource) refresh(ctx context.Context, refreshToken string) (config.
 	decodeErr := json.Unmarshal(body, &v)
 	switch {
 	case v.ShouldLogout:
-		return config.Auth{}, errLogout
+		return config.Auth{}, ErrLogout
 	case status != http.StatusOK:
 		return config.Auth{}, fmt.Errorf("refresh failed: HTTP %d", status)
 	case decodeErr != nil:

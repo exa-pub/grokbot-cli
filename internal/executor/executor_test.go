@@ -486,3 +486,10 @@ func TestUploadThroughDanglingSymlink(t *testing.T) {
 		t.Fatal("file written outside root")
 	}
 }
+
+// Foreground commands run in their own session, detached from the CLI's
+// controlling terminal, so /dev/tty fails instead of stopping the command.
+func TestShellOwnSession(t *testing.T) {
+	e := setup(t)
+	expectStdout(t, e, `awk '{print ($6 == $1) ? "leader" : "member"}' /proc/$$/stat`, "leader\n")
+}

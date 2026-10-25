@@ -103,16 +103,16 @@ func TestCancelBacklogTombstoneAndPendingKeepalive(t *testing.T) {
 	s.credential.Credential = "c"
 	s.active = maxActive
 	frame := &requestFrame{RequestId: "canceled", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Exec{Exec: &aiserverv1.GrokBotUserComputerExec{ServerMessageJson: `{"readArgs":{"path":"x"}}`}}}
-	s.accept(frame)
+	s.accept(frame, false)
 	if len(s.backlog) != 1 {
 		t.Fatal("missing backlog")
 	}
 	s.queue(&responseFrame{RequestId: "canceled", Frame: &aiserverv1.GrokBotUserComputerResponseFrame_Client{Client: &aiserverv1.GrokBotUserComputerClientMessage{MessageJson: "old"}}})
-	s.accept(&requestFrame{RequestId: "canceled", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Cancel{Cancel: &aiserverv1.GrokBotUserComputerCancel{}}})
+	s.accept(&requestFrame{RequestId: "canceled", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Cancel{Cancel: &aiserverv1.GrokBotUserComputerCancel{}}}, false)
 	if len(s.backlog) != 0 || s.tasks["canceled"] != nil || len(s.pending) != 1 || s.pending[0].GetControl() == nil {
 		t.Fatal("cancel did not discard backlog/replies")
 	}
-	s.accept(frame)
+	s.accept(frame, false)
 	if len(s.backlog) != 0 {
 		t.Fatal("canceled work restarted")
 	}
@@ -208,7 +208,7 @@ func TestInflightLimitAndShutdownCancel(t *testing.T) {
 	s := testSession(t)
 	s.active = 8
 	for i := range 65 {
-		s.accept(&requestFrame{RequestId: fmt.Sprint(i), Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Exec{Exec: &aiserverv1.GrokBotUserComputerExec{ServerMessageJson: `{"readArgs":{"path":"x"}}`}}})
+		s.accept(&requestFrame{RequestId: fmt.Sprint(i), Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Exec{Exec: &aiserverv1.GrokBotUserComputerExec{ServerMessageJson: `{"readArgs":{"path":"x"}}`}}}, false)
 	}
 	if len(s.backlog) != 64 || len(s.tasks) != 64 || len(s.pending) != 1 {
 		t.Fatal(len(s.backlog), len(s.tasks), len(s.pending))
@@ -255,9 +255,19 @@ type stubCloud struct {
 	submitted              []*responseFrame
 	block                  chan struct{} // holds submits until closed
 	unauthenticated        bool          // submits are rejected
+	rejectWatch            bool          // watches are rejected
+	connect                bool          // watches report connected
+	blockIssue             chan struct{} // holds issues until closed
 }
 
 func (c *stubCloud) IssueGrokBotUserComputerCredential(ctx context.Context, r *connect.Request[aiserverv1.IssueGrokBotUserComputerCredentialRequest]) (*connect.Response[aiserverv1.IssueGrokBotUserComputerCredentialResponse], error) {
+	if c.blockIssue != nil {
+		select {
+		case <-c.blockIssue:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.issues++
@@ -292,6 +302,14 @@ func (c *stubCloud) PollGrokBotUserComputerRequests(ctx context.Context, r *conn
 	return connect.NewResponse(&aiserverv1.PollGrokBotUserComputerRequestsResponse{}), nil
 }
 func (c *stubCloud) WatchGrokBotUserComputerRequests(ctx context.Context, r *connect.Request[aiserverv1.WatchGrokBotUserComputerRequestsRequest], stream *connect.ServerStream[aiserverv1.WatchGrokBotUserComputerRequestsEvent]) error {
+	if c.rejectWatch {
+		return connect.NewError(connect.CodeUnauthenticated, errors.New("rejected"))
+	}
+	if c.connect {
+		if err := stream.Send(&aiserverv1.WatchGrokBotUserComputerRequestsEvent{Event: &aiserverv1.WatchGrokBotUserComputerRequestsEvent_Connected{Connected: &aiserverv1.WatchGrokBotUserComputerConnected{}}}); err != nil {
+			return err
+		}
+	}
 	<-ctx.Done()
 	return ctx.Err()
 }
@@ -301,14 +319,21 @@ func (c *stubCloud) counts() (issues, submits, polls int) {
 	return c.issues, c.submits, c.polls
 }
 
-// stubSession returns a session talking to c whose clock is controlled by *now.
-func stubSession(t *testing.T, c *stubCloud, now *time.Time) *session {
+// stubServer serves c over HTTP until the test ends.
+func stubServer(t *testing.T, c *stubCloud) *httptest.Server {
 	t.Helper()
 	path, h := rpc.NewGrokBotServiceHandler(c)
 	mux := http.NewServeMux()
 	mux.Handle(path, h)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
+	return srv
+}
+
+// stubSession returns a session talking to c whose clock is controlled by *now.
+func stubSession(t *testing.T, c *stubCloud, now *time.Time) *session {
+	t.Helper()
+	srv := stubServer(t, c)
 	s := testSession(t)
 	*now = time.Now()
 	s.pv.Now = func() time.Time { return *now }
@@ -323,13 +348,17 @@ func stubSession(t *testing.T, c *stubCloud, now *time.Time) *session {
 	return s
 }
 
-// settle waits for the submit and poll in flight, applying their results like
+// settle waits for the issue, submit and poll in flight, applying their results like
 // Run does, and returns the first error.
 func settle(t *testing.T, s *session) error {
 	t.Helper()
 	var first error
-	for s.submitting || s.polling {
+	for s.submitting || s.polling || s.issuing {
 		select {
+		case r := <-s.issued:
+			if err := s.onIssued(r); err != nil && first == nil {
+				first = err
+			}
 		case r := <-s.submitted:
 			if err := s.onSubmitted(r); err != nil && first == nil {
 				first = err
@@ -407,7 +436,7 @@ func TestCancelKeepsCloseOfFinishedRequest(t *testing.T) {
 	s := testSession(t)
 	s.queue(&responseFrame{RequestId: "fin", Frame: &aiserverv1.GrokBotUserComputerResponseFrame_Client{Client: &aiserverv1.GrokBotUserComputerClientMessage{MessageJson: "result"}}})
 	s.queue(closeFrame("fin"))
-	s.accept(&requestFrame{RequestId: "fin", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Cancel{Cancel: &aiserverv1.GrokBotUserComputerCancel{}}})
+	s.accept(&requestFrame{RequestId: "fin", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Cancel{Cancel: &aiserverv1.GrokBotUserComputerCancel{}}}, false)
 	if len(s.pending) != 1 || s.pending[0].GetControl() == nil {
 		t.Fatal("cancel purged the stream close", s.pending)
 	}
@@ -488,6 +517,11 @@ func TestFailedRenewalKeepsSessionWorking(t *testing.T) {
 	tick(t, s)
 	if _, _, p := c.counts(); p != polls+1 {
 		t.Fatal("poll blocked by failed renewal")
+	}
+	now = now.Add(issueBackoff - time.Second)
+	tick(t, s)
+	if issues, _, _ := c.counts(); issues != 1 {
+		t.Fatal("renewal retried before backoff", issues)
 	}
 	now = now.Add(time.Second)
 	tick(t, s)
