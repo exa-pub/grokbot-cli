@@ -1,5 +1,10 @@
 # grokbot-tunnel
 
+[![CI](https://github.com/exa-pub/grokbot-tunnel/actions/workflows/ci.yml/badge.svg)](https://github.com/exa-pub/grokbot-tunnel/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/exa-pub/grokbot-tunnel)](https://github.com/exa-pub/grokbot-tunnel/releases/latest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/exa-pub/grokbot-tunnel)](go.mod)
+[![License: MIT](https://img.shields.io/github/license/exa-pub/grokbot-tunnel)](LICENSE)
+
 grokbot-tunnel connects a Linux server to Grok Bot as a computer. The Grok Bot
 agent can then run commands and work with files on that server, the same way
 it does on a machine with the Grok Bot desktop app, but without a desktop.
