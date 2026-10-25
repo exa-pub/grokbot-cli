@@ -1,0 +1,165 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+
+linters:
+  default: standard
+  disable:
+    - ineffassign # intentional ctx shadowing
+  enable:
+    - misspell
+    - errorlint
+    - nilerr
+    - revive
+    - unconvert
+    - prealloc
+    - bodyclose
+    - noctx
+    - durationcheck
+    - makezero
+    - nilnil
+    - gocognit
+    - cyclop
+    - funlen
+    - lll
+    - gosec
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        - (io.Closer).Close
+        - (*google.golang.org/grpc.ClientConn).Close
+
+    errorlint:
+      errorf: true
+      errorf-multi: true
+      asserts: true
+      comparison: true
+
+    gocognit:
+      min-complexity: 25
+
+    cyclop:
+      max-complexity: 15
+
+    funlen:
+      lines: 60
+      statements: 40
+
+    lll:
+      line-length: 140
+      tab-width: 4
+
+    govet:
+      disable:
+        - fieldalignment
+
+    misspell:
+      locale: US
+
+    prealloc:
+      simple: true
+      for-loops: true
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+          disabled: true
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: import-alias-naming
+          arguments:
+            - "^[a-z][a-z0-9]+$"
+        - name: package-comments
+          disabled: true
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+          disabled: true
+        - name: var-declaration
+        - name: var-naming
+
+    staticcheck:
+      checks:
+        - all
+        - -SA1019
+        - -SA4006 # intentional ctx shadowing
+
+    gosec:
+      excludes:
+        - G104
+        - G304
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: "_test\\.go$"
+        linters:
+          - errcheck
+          - gosec
+          - gocognit
+          - cyclop
+          - funlen
+          - lll
+    paths:
+      - ai.tmp
+      - ".*\\.pb\\.go$"
+      - "mock/"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/exa-pub/grokbot-cli
+  exclusions:
+    generated: strict
+    paths:
+      - ".*\\.pb\\.go$"
+      - "mock/"
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5
+
+output:
+  formats:
+    text:
+      print-linter-name: true
+      print-issued-lines: true
+  sort-order:
+    - linter
+    - severity
+    - file
+
+severity:
+  default: warning
+  rules:
+    - linters:
+        - errcheck
+        - govet
+        - staticcheck
+      severity: error

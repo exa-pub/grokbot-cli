@@ -1,0 +1,270 @@
+syntax = "proto3";
+package aiserver.v1;
+option go_package = "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1;aiserverv1";
+message GetMeResponse {
+  string auth_id = 1;
+  int32 user_id = 2;
+  optional string email = 3;
+  optional string first_name = 4;
+  optional string last_name = 5;
+  optional string workos_id = 6;
+  optional int32 team_id = 7;
+  optional string created_at = 8;
+  optional bool is_enterprise_user = 9;
+  optional string team_name = 10;
+  optional string email_domain_type = 11;
+  optional string country = 12;
+  optional string profile_picture_url = 13;
+  optional bool cursor_review_onboarding_use_cursor_github_app = 14;
+  optional int64 organization_id = 15;
+  optional string organization_public_id = 16;
+  optional bool is_team_admin = 17;
+  optional bool has_active_mobile_session = 18;
+  optional string public_user_id = 19;
+  optional bool scm_only_restricted = 20;
+}
+message GetMeRequest {
+  optional int32 team_id = 1;
+  optional string source_site_hostname = 2;
+  optional bool include_mobile_app_status = 3;
+}
+message RegisterSandMachineResponse {
+  string credential = 1;
+  int64 expires_at_ms = 2;
+  bool credential_held = 3;
+}
+message RegisterSandMachineRequest {
+  string label = 1;
+  optional string local_tool_permission = 2;
+  optional bool messages_enabled = 3;
+  string kind = 4;
+}
+message SubmitGrokBotUserComputerResponsesResponse {
+  uint32 accepted_count = 1;
+}
+message SubmitGrokBotUserComputerResponsesRequest {
+  string machine_id = 1;
+  string credential = 2;
+  repeated .aiserver.v1.GrokBotUserComputerResponseFrame frames = 3;
+}
+message GrokBotUserComputerResponseFrame {
+  string request_id = 1;
+  oneof frame {
+    .aiserver.v1.GrokBotUserComputerClientMessage client = 2;
+    .aiserver.v1.GrokBotUserComputerControlMessage control = 3;
+    .aiserver.v1.GrokBotUserComputerFile file = 4;
+    .aiserver.v1.GrokBotUserComputerFileError file_error = 5;
+    .aiserver.v1.GrokBotUserComputerMessagesResult messages_result = 6;
+    .aiserver.v1.GrokBotUserComputerMessagesError messages_error = 7;
+    .aiserver.v1.GrokBotUserComputerMessagesConsentResult messages_consent_result = 8;
+    .aiserver.v1.GrokBotUserComputerMessagesAccepted messages_accepted = 9;
+    .aiserver.v1.GrokBotUserComputerLocalToolAccepted local_tool_accepted = 10;
+    .aiserver.v1.GrokBotUserComputerLocalToolResult local_tool_result = 11;
+    .aiserver.v1.GrokBotUserComputerLocalToolPermissionPending local_tool_permission_pending = 12;
+  }
+}
+message GrokBotUserComputerLocalToolPermissionPending {
+  string reason = 1;
+}
+message GrokBotUserComputerLocalToolResult {
+  string status = 1;
+  string output_json = 2;
+  string error = 3;
+}
+message GrokBotUserComputerLocalToolAccepted {
+  bool permission_granted = 1;
+}
+message GrokBotUserComputerMessagesAccepted {
+}
+message GrokBotUserComputerMessagesConsentResult {
+  .aiserver.v1.GrokBotUserComputerMessagesConsentVerdict verdict = 1;
+  optional string reason = 2;
+}
+enum GrokBotUserComputerMessagesConsentVerdict {
+  GROK_BOT_USER_COMPUTER_MESSAGES_CONSENT_VERDICT_UNSPECIFIED = 0;
+  GROK_BOT_USER_COMPUTER_MESSAGES_CONSENT_VERDICT_STANDING = 1;
+  GROK_BOT_USER_COMPUTER_MESSAGES_CONSENT_VERDICT_ASK = 2;
+  GROK_BOT_USER_COMPUTER_MESSAGES_CONSENT_VERDICT_REFUSED = 3;
+}
+message GrokBotUserComputerMessagesError {
+  string error = 1;
+}
+message GrokBotUserComputerMessagesResult {
+  string result_json = 1;
+  optional uint32 daemon_ms = 2;
+  optional uint32 helper_ms = 3;
+  optional uint32 sqlite_ms = 4;
+}
+message GrokBotUserComputerFileError {
+  string error = 1;
+}
+message GrokBotUserComputerFile {
+  bytes data = 1;
+  uint32 seq = 2;
+  bool last = 3;
+}
+message GrokBotUserComputerControlMessage {
+  string message_json = 1;
+  optional string cwd_state = 2;
+}
+message GrokBotUserComputerClientMessage {
+  string message_json = 1;
+}
+message PollGrokBotUserComputerRequestsResponse {
+  repeated .aiserver.v1.GrokBotUserComputerQueuedRequest requests = 1;
+}
+message GrokBotUserComputerQueuedRequest {
+  string id = 1;
+  .aiserver.v1.GrokBotUserComputerRequestFrame frame = 2;
+  int64 enqueued_at_ms = 3;
+}
+message GrokBotUserComputerRequestFrame {
+  string request_id = 1;
+  oneof frame {
+    .aiserver.v1.GrokBotUserComputerExec exec = 2;
+    .aiserver.v1.GrokBotUserComputerUpload upload = 3;
+    .aiserver.v1.GrokBotUserComputerDownload download = 4;
+    .aiserver.v1.GrokBotUserComputerRetireApproval retire_approval = 5;
+    .aiserver.v1.GrokBotUserComputerCancel cancel = 6;
+    .aiserver.v1.GrokBotUserComputerMessagesOp messages_op = 7;
+    .aiserver.v1.GrokBotUserComputerLocalToolCall local_tool = 9;
+    .aiserver.v1.GrokBotUserComputerDiscoverAiTool discover_ai_tool = 12;
+  }
+}
+message GrokBotUserComputerDiscoverAiTool {
+  string source = 1;
+  optional string approval_id = 2;
+  bool authorized_by_standing = 3;
+  bool authorized_by_approval = 4;
+}
+message GrokBotUserComputerLocalToolCall {
+  string tool_id = 1;
+  string input_json = 2;
+  optional string approval_id = 3;
+  string conversation_id = 4;
+}
+message GrokBotUserComputerMessagesOp {
+  string op_json = 1;
+  optional string approval_id = 2;
+  optional string send_key = 3;
+}
+message GrokBotUserComputerCancel {
+}
+message GrokBotUserComputerRetireApproval {
+  string approval_id = 1;
+}
+message GrokBotUserComputerDownload {
+  string path = 1;
+  optional string approval_id = 2;
+  bool authorized_by_standing = 3;
+  bool authorized_by_approval = 4;
+}
+message GrokBotUserComputerUpload {
+  string path = 1;
+  optional string approval_id = 2;
+  bytes data = 3;
+  bool authorized_by_standing = 4;
+  bool authorized_by_approval = 5;
+}
+message GrokBotUserComputerExec {
+  string server_message_json = 1;
+  optional string approval_id = 2;
+  bool authorized_by_standing = 3;
+  bool authorized_by_approval = 4;
+}
+message PollGrokBotUserComputerRequestsRequest {
+  string machine_id = 1;
+  string credential = 2;
+  repeated string ack_ids = 3;
+  uint32 limit = 4;
+}
+message WatchGrokBotUserComputerRequestsEvent {
+  oneof event {
+    .aiserver.v1.WatchGrokBotUserComputerConnected connected = 1;
+    .aiserver.v1.WatchGrokBotUserComputerNotify notify = 2;
+    .aiserver.v1.WatchGrokBotUserComputerHeartbeat heartbeat = 3;
+  }
+}
+message WatchGrokBotUserComputerHeartbeat {
+  uint32 pending_request_count = 1;
+}
+message WatchGrokBotUserComputerNotify {
+}
+message WatchGrokBotUserComputerConnected {
+  uint32 pending_request_count = 1;
+}
+message WatchGrokBotUserComputerRequestsRequest {
+  string machine_id = 1;
+  string credential = 2;
+  .aiserver.v1.GrokBotUserComputerHello hello = 3;
+}
+message GrokBotUserComputerHello {
+  string label = 1;
+  string local_root = 2;
+  string terminals_folder = 3;
+  string standing = 4;
+  bool supervised = 5;
+  string variant = 6;
+  bool server_authoritative = 7;
+  .aiserver.v1.GrokBotUserComputerCapabilities capabilities = 8;
+  string kind = 9;
+}
+message GrokBotUserComputerCapabilities {
+  optional bool messages_op = 1;
+  optional int32 messages_op_generation = 2;
+  optional bool local_standing_grants = 3;
+  optional bool ai_tool_setup = 4;
+  optional bool shell = 6;
+  repeated .aiserver.v1.GrokBotUserComputerLocalTool mobile_local_tools = 7;
+  optional bool local_tool_app_consent = 8;
+  optional bool local_tool_grant_seen = 9;
+  optional string local_tool_helper_name = 10;
+}
+message GrokBotUserComputerLocalTool {
+  string tool_id = 1;
+  string state = 2;
+}
+message IssueGrokBotUserComputerCredentialResponse {
+  string credential = 1;
+  int64 expires_at_ms = 2;
+  bool server_authoritative = 3;
+}
+message IssueGrokBotUserComputerCredentialRequest {
+  string machine_id = 1;
+  string credential = 2;
+}
+service GrokBotService {
+rpc IssueGrokBotUserComputerCredential(IssueGrokBotUserComputerCredentialRequest) returns (IssueGrokBotUserComputerCredentialResponse);
+rpc WatchGrokBotUserComputerRequests(WatchGrokBotUserComputerRequestsRequest) returns (stream WatchGrokBotUserComputerRequestsEvent);
+rpc PollGrokBotUserComputerRequests(PollGrokBotUserComputerRequestsRequest) returns (PollGrokBotUserComputerRequestsResponse);
+rpc SubmitGrokBotUserComputerResponses(SubmitGrokBotUserComputerResponsesRequest) returns (SubmitGrokBotUserComputerResponsesResponse);
+}
+
+service DashboardService {
+ rpc GetUserPrivacyMode(GetUserPrivacyModeRequest) returns (GetUserPrivacyModeResponse);
+rpc GetMe(GetMeRequest) returns (GetMeResponse);
+rpc RegisterSandMachine(RegisterSandMachineRequest) returns (RegisterSandMachineResponse);
+}
+
+message GetUserPrivacyModeRequest {
+  .aiserver.v1.PrivacyMode inferred_privacy_mode = 1;
+  optional int32 team_id = 2;
+}
+
+message GetUserPrivacyModeResponse {
+  .aiserver.v1.PrivacyMode privacy_mode = 1;
+  int32 hours_remaining_in_grace_period = 2;
+  bool is_enforced_by_team = 3;
+  bool is_not_migrated_to_server_source_of_truth = 4;
+  bool partner_data_share = 5;
+  bool has_acknowledged_grace_period_disclaimer = 6;
+  optional .aiserver.v1.PrivacyMode account_privacy_mode = 7;
+}
+
+enum PrivacyMode {
+  PRIVACY_MODE_UNSPECIFIED = 0;
+  PRIVACY_MODE_NO_STORAGE = 1;
+  PRIVACY_MODE_NO_TRAINING = 2;
+  PRIVACY_MODE_USAGE_DATA_TRAINING_ALLOWED = 3;
+  PRIVACY_MODE_USAGE_CODEBASE_TRAINING_ALLOWED = 4;
+}

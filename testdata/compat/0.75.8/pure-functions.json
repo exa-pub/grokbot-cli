@@ -1,0 +1,62 @@
+{
+  "provenance": {
+    "version": "0.75.8",
+    "platform": "linux",
+    "method": "isolated pure functions from source; not desktop traffic",
+    "source": "local-exec-daemon/main.cjs",
+    "markers": [
+      "bfr",
+      "Sge",
+      "wce",
+      "Pk"
+    ]
+  },
+  "ranges": [
+    {
+      "text": "",
+      "args": {},
+      "result": {
+        "content": "",
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree\n",
+      "args": {
+        "offset": 2,
+        "limit": 1
+      },
+      "result": {
+        "content": "two",
+        "rangeApplied": true
+      }
+    },
+    {
+      "text": "one\ntwo\n",
+      "args": {
+        "offset": 20
+      },
+      "result": {
+        "content": "one\ntwo\n",
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree",
+      "args": {
+        "offset": -2
+      },
+      "result": {
+        "content": "two\nthree",
+        "rangeApplied": true
+      }
+    }
+  ],
+  "discoveryMissing": {
+    "source": "codex",
+    "found": false,
+    "sessionCount": 0,
+    "items": []
+  },
+  "terminalHeader": "---\npid: 42\ncwd: \"/workspace\"\ncommand: \"printf hello\"\nstatus: running  \nstarted_at: 2026-01-01T00:00:00.000Z\nrunning_for_ms: 0        \n---\n"
+}

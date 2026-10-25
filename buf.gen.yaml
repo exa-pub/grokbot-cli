@@ -1,0 +1,8 @@
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: internal/gen
+    opt: module=github.com/exa-pub/grokbot-cli/internal/gen
+  - local: protoc-gen-connect-go
+    out: internal/gen
+    opt: module=github.com/exa-pub/grokbot-cli/internal/gen

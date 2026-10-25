@@ -1,0 +1,315 @@
+syntax = "proto3";
+package agent.v1;
+option go_package = "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1;agentv1";
+message ExecClientControlMessage {
+  oneof message {
+    .agent.v1.ExecClientStreamClose stream_close = 1;
+    .agent.v1.ExecClientThrow throw = 2;
+    .agent.v1.ExecClientHeartbeat heartbeat = 3;
+  }
+}
+message ExecClientHeartbeat {
+  uint32 id = 1;
+}
+message ExecClientThrow {
+  uint32 id = 1;
+  string error = 2;
+  optional string stack_trace = 3;
+  optional string error_code = 4;
+}
+message ExecClientStreamClose {
+  uint32 id = 1;
+}
+message ExecClientMessage {
+  uint32 id = 1;
+  string exec_id = 15;
+  optional int32 local_execution_time_ms = 39;
+  oneof message {
+    .agent.v1.ReadResult read_result = 7;
+    .agent.v1.LsResult ls_result = 8;
+    .agent.v1.ShellStream shell_stream = 14;
+    .agent.v1.BackgroundShellSpawnResult background_shell_spawn_result = 16;
+  }
+}
+message BackgroundShellSpawnResult {
+  oneof result {
+    .agent.v1.BackgroundShellSpawnSuccess success = 1;
+    .agent.v1.BackgroundShellSpawnError error = 2;
+    .agent.v1.ShellRejected rejected = 3;
+    .agent.v1.ShellPermissionDenied permission_denied = 4;
+    .agent.v1.ShellSandboxUnsupported sandbox_unsupported = 5;
+  }
+}
+message ShellSandboxUnsupported {
+  string command = 1;
+  string working_directory = 2;
+  string sandbox_policy_type = 3;
+  string reason = 4;
+  bool is_readonly = 5;
+}
+message ShellPermissionDenied {
+  string command = 1;
+  string working_directory = 2;
+  string error = 3;
+  bool is_readonly = 4;
+}
+message ShellRejected {
+  string command = 1;
+  string working_directory = 2;
+  string reason = 3;
+  bool is_readonly = 4;
+}
+message BackgroundShellSpawnError {
+  string command = 1;
+  string working_directory = 2;
+  string error = 3;
+}
+message BackgroundShellSpawnSuccess {
+  uint32 shell_id = 1;
+  string command = 2;
+  string working_directory = 3;
+  optional uint32 pid = 4;
+}
+message ShellStream {
+  oneof event {
+    .agent.v1.ShellStreamStdout stdout = 1;
+    .agent.v1.ShellStreamStderr stderr = 2;
+    .agent.v1.ShellStreamExit exit = 3;
+    .agent.v1.ShellStreamStart start = 4;
+    .agent.v1.ShellRejected rejected = 5;
+    .agent.v1.ShellPermissionDenied permission_denied = 6;
+    .agent.v1.ShellStreamBackgrounded backgrounded = 7;
+    .agent.v1.ShellStreamHookContext hook_context = 8;
+    .agent.v1.ShellSandboxUnsupported sandbox_unsupported = 9;
+  }
+}
+message ShellStreamHookContext {
+  repeated .agent.v1.HookAdditionalContext hook_additional_contexts = 1;
+}
+message HookAdditionalContext {
+  string hook_event_name = 1;
+  string content = 2;
+}
+message ShellStreamBackgrounded {
+  uint32 shell_id = 1;
+  string command = 2;
+  string working_directory = 3;
+  optional uint32 pid = 4;
+  optional int32 ms_to_wait = 5;
+  optional .agent.v1.ShellBackgroundReason reason = 6;
+}
+enum ShellBackgroundReason {
+  SHELL_BACKGROUND_REASON_UNSPECIFIED = 0;
+  SHELL_BACKGROUND_REASON_TIMEOUT = 1;
+  SHELL_BACKGROUND_REASON_USER_REQUEST = 2;
+}
+message ShellStreamStart {
+  optional .agent.v1.SandboxPolicy sandbox_policy = 1;
+  optional string command = 2;
+}
+message SandboxPolicy {
+  enum ReadBoundaryMode {
+    READ_BOUNDARY_MODE_UNSPECIFIED = 0;
+    READ_BOUNDARY_MODE_SYSTEM = 1;
+    READ_BOUNDARY_MODE_WORKSPACE = 2;
+  }
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_INSECURE_NONE = 1;
+    TYPE_WORKSPACE_READWRITE = 2;
+    TYPE_WORKSPACE_READONLY = 3;
+  }
+  .agent.v1.SandboxPolicy.Type type = 1;
+  optional bool network_access = 2;
+  repeated string additional_readwrite_paths = 3;
+  repeated string additional_readonly_paths = 4;
+  optional string debug_output_dir = 5;
+  optional bool disable_tmp_write = 7;
+  optional bool allowlist_escalated = 8;
+  optional bool enable_shared_build_cache = 9;
+  optional .agent.v1.NetworkPolicy network_policy = 10;
+  optional bool network_policy_strict = 11;
+  optional bool capture_denies = 12;
+  optional bool skip_statsig_defaults = 13;
+  .agent.v1.SandboxPolicy.ReadBoundaryMode read_boundary = 14;
+  repeated string additional_read_paths = 15;
+}
+message NetworkPolicy {
+  enum DefaultAction {
+    DEFAULT_ACTION_UNSPECIFIED = 0;
+    DEFAULT_ACTION_ALLOW = 1;
+    DEFAULT_ACTION_DENY = 2;
+  }
+  optional uint32 version = 1;
+  optional .agent.v1.NetworkPolicy.DefaultAction default_action = 2;
+  repeated string deny = 3;
+  repeated string allow = 4;
+  optional .agent.v1.NetworkPolicyLoggingConfig logging = 5;
+}
+message NetworkPolicyLoggingConfig {
+  optional string decision_log_path = 1;
+  optional string log_format = 2;
+}
+message ShellStreamExit {
+  uint32 code = 1;
+  string cwd = 2;
+  optional .agent.v1.OutputLocation output_location = 3;
+  bool aborted = 4;
+  optional .agent.v1.ShellAbortReason abort_reason = 5;
+  optional int32 local_execution_time_ms = 6;
+  optional .agent.v1.ShellOomKill oom_kill = 7;
+}
+message ShellOomKill {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_COMMAND_KILLED = 1;
+    KIND_COMMAND_FAILED = 2;
+    KIND_UNCONFIRMED = 3;
+  }
+  .agent.v1.ShellOomKill.Kind kind = 1;
+  uint64 memory_limit_bytes = 2;
+}
+enum ShellAbortReason {
+  SHELL_ABORT_REASON_UNSPECIFIED = 0;
+  SHELL_ABORT_REASON_USER_ABORT = 1;
+  SHELL_ABORT_REASON_TIMEOUT = 2;
+}
+message OutputLocation {
+  string file_path = 1;
+  int64 size_bytes = 2;
+  int64 line_count = 3;
+}
+message ShellStreamStderr {
+  string data = 1;
+}
+message ShellStreamStdout {
+  string data = 1;
+}
+message LsResult {
+  oneof result {
+    .agent.v1.LsSuccess success = 1;
+    .agent.v1.LsError error = 2;
+    .agent.v1.LsRejected rejected = 3;
+    .agent.v1.LsTimeout timeout = 4;
+  }
+}
+message LsTimeout {
+  .agent.v1.LsDirectoryTreeNode directory_tree_root = 1;
+}
+message LsDirectoryTreeNode {
+  message File {
+    string name = 1;
+    optional .agent.v1.TerminalMetadata terminal_metadata = 2;
+  }
+  string abs_path = 1;
+  repeated .agent.v1.LsDirectoryTreeNode children_dirs = 2;
+  repeated .agent.v1.LsDirectoryTreeNode.File children_files = 3;
+  bool children_were_processed = 4;
+  map<string, int32> full_subtree_extension_counts = 5;
+  int32 num_files = 6;
+}
+message TerminalMetadata {
+  message Command {
+    string command = 1;
+    optional int32 exit_code = 2;
+    optional int64 timestamp_ms = 3;
+    optional int64 duration_ms = 4;
+  }
+  optional string cwd = 1;
+  repeated .agent.v1.TerminalMetadata.Command last_commands = 2;
+  optional int64 last_modified_ms = 3;
+  optional .agent.v1.TerminalMetadata.Command current_command = 4;
+}
+message LsRejected {
+  string path = 1;
+  string reason = 2;
+}
+message LsError {
+  string path = 1;
+  string error = 2;
+}
+message LsSuccess {
+  .agent.v1.LsDirectoryTreeNode directory_tree_root = 1;
+}
+message ReadResult {
+  oneof result {
+    .agent.v1.ReadSuccess success = 1;
+    .agent.v1.ReadError error = 2;
+    .agent.v1.ReadRejected rejected = 3;
+    .agent.v1.ReadFileNotFound file_not_found = 4;
+    .agent.v1.ReadPermissionDenied permission_denied = 5;
+    .agent.v1.ReadInvalidFile invalid_file = 6;
+  }
+}
+message ReadInvalidFile {
+  string path = 1;
+  string reason = 2;
+}
+message ReadPermissionDenied {
+  string path = 1;
+}
+message ReadFileNotFound {
+  string path = 1;
+}
+message ReadRejected {
+  string path = 1;
+  string reason = 2;
+}
+message ReadError {
+  string path = 1;
+  string error = 2;
+}
+message ReadSuccess {
+  string path = 1;
+  oneof output {
+    string content = 2;
+    bytes data = 5;
+  }
+  int32 total_lines = 3;
+  int64 file_size = 4;
+  bool truncated = 6;
+  optional bytes output_blob_id = 7;
+  bool range_applied = 8;
+  optional string sha256 = 9;
+  optional int64 size_bytes = 10;
+}
+message ExecServerMessage {
+  uint32 id = 1;
+  string exec_id = 15;
+  oneof message {
+    .agent.v1.ReadArgs read_args = 7;
+    .agent.v1.LsArgs ls_args = 8;
+    .agent.v1.ShellArgs shell_stream_args = 14;
+    .agent.v1.BackgroundShellSpawnArgs background_shell_spawn_args = 16;
+  }
+}
+message BackgroundShellSpawnArgs {
+  string command = 1;
+  string working_directory = 2;
+}
+message ShellArgs {
+  string command = 1;
+  string working_directory = 2;
+  int32 timeout = 3;
+  bool is_background = 11;
+  .agent.v1.TimeoutBehavior timeout_behavior = 13;
+  optional int32 hard_timeout = 14;
+}
+enum TimeoutBehavior {
+  TIMEOUT_BEHAVIOR_UNSPECIFIED = 0;
+  TIMEOUT_BEHAVIOR_CANCEL = 1;
+  TIMEOUT_BEHAVIOR_BACKGROUND = 2;
+}
+message LsArgs {
+  string path = 1;
+  repeated string ignore = 2;
+  optional uint32 timeout_ms = 5;
+}
+message ReadArgs {
+  string path = 1;
+  string tool_call_id = 2;
+  optional int32 offset = 4;
+  optional uint32 limit = 5;
+  optional string encoding_hint = 6;
+  optional bool digest_only = 7;
+}
