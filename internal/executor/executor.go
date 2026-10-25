@@ -65,6 +65,9 @@ type Executor struct {
 	foreground chan struct{}
 	stateMu    sync.Mutex // guards state
 	state      shellState
+	// initMu serializes reading the user's profile into state, once.
+	initMu      sync.Mutex
+	initialized bool
 }
 
 // New opens an executor rooted at root, resolving symlinks in root itself.

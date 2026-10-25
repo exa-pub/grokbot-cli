@@ -17,6 +17,15 @@ import (
 
 func setup(t *testing.T) *Executor {
 	t.Helper()
+	return setupHome(t, t.TempDir())
+}
+
+// setupHome isolates shells from the user's profile: HOME and ZDOTDIR point to
+// home.
+func setupHome(t *testing.T, home string) *Executor {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("ZDOTDIR", home)
 	e, err := New(t.TempDir(), &permission.Policy{Mode: "always"})
 	if err != nil {
 		t.Fatal(err)
@@ -270,9 +279,10 @@ func TestBackgroundDoesNotWaitForForeground(t *testing.T) {
 }
 
 func TestShellEnvironmentMarkersOnce(t *testing.T) {
+	t.Setenv("SHLVL", "2")
 	st := shellState{env: []string{"A=1", "CURSOR_AGENT=0", "SAND_AGENT=1", "CURSOR_AGENT_X=1"}}
 	got := strings.Join(st.environ(), " ")
-	if got != "A=1 CURSOR_AGENT_X=1 CURSOR_AGENT=1 SAND_AGENT=1" {
+	if got != "A=1 CURSOR_AGENT_X=1 SHLVL=2 CURSOR_AGENT=1 SAND_AGENT=1" {
 		t.Fatal(got)
 	}
 }
