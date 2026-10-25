@@ -1,122 +1,169 @@
-#!/bin/sh
-# Installs the latest grokbot-tunnel release.
+#!/bin/bash
+# Installs a grokbot-tunnel release into your home directory.
 #
-#   curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash -s v0.1.0
 #
-# GROKBOT_VERSION    release tag to install, e.g. v0.1.0 (default: latest)
-# GROKBOT_INSTALL_DIR  target directory (default: /usr/local/bin if writable
-#                    or sudo is available, otherwise ~/.local/bin)
-# GROKBOT_SKIP_CHECKSUM=1  install without verifying checksums.txt
-set -eu
+# The optional argument is "latest" (default) or a release tag such as v0.1.0.
+#
+# GROKBOT_VERSION              release tag to install if no argument is given
+# GROKBOT_INSTALL_DIR          target directory (default: ~/.local/bin)
+# GROKBOT_SKIP_CHECKSUM=1      install without verifying checksums.txt
+# GROKBOT_INSTALL_ALLOW_SUDO=1 allow running under sudo (installs for root)
+set -euo pipefail
 
 REPO="exa-pub/grokbot-tunnel"
 BINARY="grokbot-tunnel"
+OLD_BINARY="grokbot-cli"
 
 if [ -t 2 ]; then
-  BOLD='\033[1m' RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[0;33m' RESET='\033[0m'
+    BOLD=$'\033[1m' RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' RESET=$'\033[0m'
 else
-  BOLD='' RED='' GREEN='' YELLOW='' RESET=''
+    BOLD='' RED='' GREEN='' YELLOW='' RESET=''
 fi
 
-info() { printf "${BOLD}${GREEN}==> %s${RESET}\n" "$*" >&2; }
-warn() { printf "${BOLD}${YELLOW}==> %s${RESET}\n" "$*" >&2; }
-fail() { printf "${BOLD}${RED}Error: %s${RESET}\n" "$*" >&2; exit 1; }
+info() { printf '%s==> %s%s\n' "${BOLD}${GREEN}" "$*" "$RESET" >&2; }
+warn() { printf '%s==> %s%s\n' "${BOLD}${YELLOW}" "$*" "$RESET" >&2; }
+fail() { printf '%sError: %s%s\n' "${BOLD}${RED}" "$*" "$RESET" >&2; exit 1; }
+
+TARGET="${1:-${GROKBOT_VERSION:-latest}}"
+if [[ ! "$TARGET" =~ ^(latest|v?[0-9]+\.[0-9]+\.[0-9]+(-[^[:space:]]+)?)$ ]]; then
+    echo "Usage: $0 [latest|VERSION]" >&2
+    exit 1
+fi
+if [ "$TARGET" != latest ] && [[ "$TARGET" != v* ]]; then
+    TARGET="v$TARGET"
+fi
+
+# Under sudo, $HOME usually points at root's home, so the binary would land in
+# /root/.local/bin and the command would be missing from the user's shell.
+# Plain root (containers, CI) is fine.
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ] &&
+    [ -z "${GROKBOT_INSTALL_ALLOW_SUDO:-}" ]; then
+    cat >&2 <<EOF
+Error: do not run this installer with sudo.
+
+${BINARY} installs into your home directory and does not need root access.
+With sudo it would be installed into root's home directory instead of yours.
+
+Re-run the same command without sudo:
+    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash
+
+To intentionally install for the root user, set GROKBOT_INSTALL_ALLOW_SUDO=1:
+    curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sudo GROKBOT_INSTALL_ALLOW_SUDO=1 bash
+EOF
+    exit 1
+fi
 
 if command -v curl >/dev/null 2>&1; then
-  download() { curl -fsSL -o "$2" "$1"; }
+    DOWNLOADER=curl
 elif command -v wget >/dev/null 2>&1; then
-  download() { wget -q -O "$2" "$1"; }
+    DOWNLOADER=wget
 else
-  fail "curl or wget is required"
+    fail "curl or wget is required"
 fi
 
-[ "$(uname -s)" = Linux ] || fail "unsupported OS $(uname -s); only Linux is supported"
+download_file() {
+    local url="$1" output="$2"
+    if [ "$DOWNLOADER" = curl ]; then
+        curl -fsSL -o "$output" "$url"
+    else
+        wget -q -O "$output" "$url"
+    fi
+}
 
-case "$(uname -m)" in
-  x86_64 | amd64) ARCH=amd64 ;;
-  aarch64 | arm64) ARCH=arm64 ;;
-  *) fail "unsupported architecture $(uname -m)" ;;
+# Prints the URL that $1 finally redirects to.
+resolve_redirect() {
+    if [ "$DOWNLOADER" = curl ]; then
+        curl -fsSL -o /dev/null -w '%{url_effective}' "$1"
+    else
+        wget -q -S --spider "$1" 2>&1 | awk '$1 == "Location:" { l = $2 } END { print l }'
+    fi
+}
+
+case "$(uname -s)" in
+    Linux) ;;
+    Darwin) fail "macOS is not supported; only Linux is supported" ;;
+    MINGW* | MSYS* | CYGWIN*) fail "Windows is not supported; only Linux is supported" ;;
+    *) fail "unsupported operating system $(uname -s); only Linux is supported" ;;
 esac
 
-local_bin() {
-  [ -n "${HOME:-}" ] || fail "HOME is not set; set GROKBOT_INSTALL_DIR instead"
-  echo "$HOME/.local/bin"
-}
+case "$(uname -m)" in
+    x86_64 | amd64) ARCH=amd64 ;;
+    aarch64 | arm64) ARCH=arm64 ;;
+    *) fail "unsupported architecture $(uname -m)" ;;
+esac
 
-# Prompts go to stderr and read from the terminal, so they work with
-# `curl | sh` and are not captured by $(...).
-install_dir() {
-  if [ -n "${GROKBOT_INSTALL_DIR:-}" ]; then
-    echo "$GROKBOT_INSTALL_DIR"
-  elif [ "$(id -u)" = 0 ] || [ -w /usr/local/bin ]; then
-    echo /usr/local/bin
-  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    echo /usr/local/bin
-  elif command -v sudo >/dev/null 2>&1 && [ -r /dev/tty ]; then
-    warn "/usr/local/bin is not writable."
-    printf "    [1] Use sudo to install to /usr/local/bin\n" >&2
-    printf "    [2] Install to ~/.local/bin\n" >&2
-    printf "    Choice [1]: " >&2
-    # Without a usable terminal sudo could not ask for a password either.
-    if ! { read -r choice </dev/tty; } 2>/dev/null || [ "$choice" = 2 ]; then
-      local_bin
-    else
-      echo /usr/local/bin
-    fi
-  else
-    local_bin
-  fi
-}
+if [ -n "${GROKBOT_INSTALL_DIR:-}" ]; then
+    INSTALL_DIR="$GROKBOT_INSTALL_DIR"
+else
+    [ -n "${HOME:-}" ] || fail "HOME is not set; set GROKBOT_INSTALL_DIR instead"
+    INSTALL_DIR="$HOME/.local/bin"
+fi
 
-INSTALL_DIR="$(install_dir)"
-
-# sudo is needed if the nearest existing parent of INSTALL_DIR is not writable.
-SUDO=
-if [ "$(id -u)" != 0 ]; then
-  dir="$INSTALL_DIR"
-  while [ ! -d "$dir" ]; do dir="$(dirname "$dir")"; done
-  [ -w "$dir" ] || SUDO=sudo
+if [ "$TARGET" = latest ]; then
+    url="$(resolve_redirect "https://github.com/${REPO}/releases/latest" || true)"
+    VERSION="${url##*/}"
+    # Reject anything that is not a tag, e.g. when there are no releases yet.
+    [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] ||
+        fail "could not determine the latest release of ${REPO}"
+else
+    VERSION="$TARGET"
 fi
 
 ARCHIVE="${BINARY}-linux-${ARCH}.tar.gz"
-if [ -n "${GROKBOT_VERSION:-}" ]; then
-  BASE="https://github.com/${REPO}/releases/download/${GROKBOT_VERSION}"
-else
-  BASE="https://github.com/${REPO}/releases/latest/download"
-fi
+BASE="https://github.com/${REPO}/releases/download/${VERSION}"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-info "Downloading ${BASE}/${ARCHIVE}"
-download "${BASE}/${ARCHIVE}" "${TMP}/${ARCHIVE}" || fail "download failed; check GROKBOT_VERSION"
+info "Downloading ${BINARY} ${VERSION} (linux/${ARCH})"
+download_file "${BASE}/${ARCHIVE}" "${TMP}/${ARCHIVE}" ||
+    fail "download of ${BASE}/${ARCHIVE} failed; check that release ${VERSION} exists"
 
 if [ "${GROKBOT_SKIP_CHECKSUM:-}" = 1 ]; then
-  warn "GROKBOT_SKIP_CHECKSUM=1; skipping checksum verification"
+    warn "GROKBOT_SKIP_CHECKSUM=1; skipping checksum verification"
 else
-  command -v sha256sum >/dev/null 2>&1 ||
-    fail "sha256sum is required to verify the download (set GROKBOT_SKIP_CHECKSUM=1 to skip)"
-  download "${BASE}/checksums.txt" "${TMP}/checksums.txt" ||
-    fail "could not download checksums.txt (set GROKBOT_SKIP_CHECKSUM=1 to skip)"
-  expected="$(awk -v f="$ARCHIVE" '$2 == f { print $1 }' "${TMP}/checksums.txt")"
-  [ -n "$expected" ] || fail "${ARCHIVE} is missing from checksums.txt"
-  actual="$(sha256sum "${TMP}/${ARCHIVE}" | awk '{ print $1 }')"
-  [ "$actual" = "$expected" ] || fail "checksum mismatch: expected ${expected}, got ${actual}"
-  info "Checksum verified"
+    command -v sha256sum >/dev/null 2>&1 ||
+        fail "sha256sum is required to verify the download (set GROKBOT_SKIP_CHECKSUM=1 to skip)"
+    download_file "${BASE}/checksums.txt" "${TMP}/checksums.txt" ||
+        fail "could not download checksums.txt (set GROKBOT_SKIP_CHECKSUM=1 to skip)"
+    expected="$(awk -v f="$ARCHIVE" '$2 == f { print $1 }' "${TMP}/checksums.txt")"
+    [[ "$expected" =~ ^[a-f0-9]{64}$ ]] || fail "${ARCHIVE} is missing from checksums.txt"
+    actual="$(sha256sum "${TMP}/${ARCHIVE}" | cut -d' ' -f1)"
+    [ "$actual" = "$expected" ] || fail "checksum mismatch: expected ${expected}, got ${actual}"
+    info "Checksum verified"
 fi
 
 tar -xzf "${TMP}/${ARCHIVE}" -C "$TMP"
-$SUDO mkdir -p "$INSTALL_DIR"
-$SUDO install -m 755 "${TMP}/${BINARY}-linux-${ARCH}" "${INSTALL_DIR}/${BINARY}"
+mkdir -p "$INSTALL_DIR" || fail "cannot create ${INSTALL_DIR}"
+install -m 755 "${TMP}/${BINARY}-linux-${ARCH}" "${INSTALL_DIR}/${BINARY}" ||
+    fail "cannot write ${INSTALL_DIR}/${BINARY}"
 
-version="$("${INSTALL_DIR}/${BINARY}" --version)" ||
-  fail "${INSTALL_DIR}/${BINARY} was installed but does not run on this system"
-info "Installed ${version} to ${INSTALL_DIR}/${BINARY}"
+code=0
+installed="$("${INSTALL_DIR}/${BINARY}" --version)" || code=$?
+if [ "$code" -ne 0 ]; then
+    # 128+N means the binary was killed by signal N before printing anything.
+    if [ "$code" -ge 128 ]; then
+        fail "${INSTALL_DIR}/${BINARY} was killed by signal $((code - 128)) while starting"
+    fi
+    fail "${INSTALL_DIR}/${BINARY} was installed but does not run on this system"
+fi
+info "Installed ${installed} to ${INSTALL_DIR}/${BINARY}"
+
+# The project used to be called grokbot-cli; an old copy may still be on PATH.
+if old="$(command -v "$OLD_BINARY" 2>/dev/null)"; then
+    warn "Found the old ${OLD_BINARY} binary at ${old}; it is no longer updated. Remove it with:"
+    echo "    rm ${old}" >&2
+fi
 
 case ":${PATH}:" in
-  *":${INSTALL_DIR}:"*) ;;
-  *)
-    warn "${INSTALL_DIR} is not in your PATH. Add it, e.g. in ~/.bashrc or ~/.zshrc:"
-    echo "    export PATH=\"${INSTALL_DIR}:\$PATH\"" >&2
-    ;;
+    *":${INSTALL_DIR}:"*) ;;
+    *)
+        warn "${INSTALL_DIR} is not in your PATH. Add it, e.g. in ~/.bashrc or ~/.zshrc:"
+        echo "    export PATH=\"${INSTALL_DIR}:\$PATH\"" >&2
+        ;;
 esac
+
+echo "" >&2
+echo "✅ Installation complete! Run '${BINARY} login' to get started." >&2

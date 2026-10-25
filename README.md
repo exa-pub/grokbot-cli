@@ -7,12 +7,13 @@ run commands and work with files on it. It speaks the protocol of the Grok Bot
 ## Installation
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash
 ```
 
-The script installs the latest release to `/usr/local/bin` or, without sudo,
-to `~/.local/bin`. Set `GROKBOT_VERSION` or `GROKBOT_INSTALL_DIR` to change
-that. You can also download the binary from
+The script installs the latest release to `~/.local/bin` and does not need
+sudo. To install a specific release, pass its tag:
+`... | bash -s v0.1.0`. Set `GROKBOT_INSTALL_DIR` to change the target
+directory. You can also download the binary from
 [Releases](https://github.com/exa-pub/grokbot-tunnel/releases) or
 [build from source](CONTRIBUTING.md).
 
