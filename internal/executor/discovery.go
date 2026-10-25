@@ -188,8 +188,8 @@ func readTail(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 	n := min(st.Size(), historyBytes)
-	b := make([]byte, n)
-	if _, err := f.ReadAt(b, st.Size()-n); err != nil && !errors.Is(err, io.EOF) {
+	b, err := readAtMost(f, n, st.Size()-n)
+	if err != nil {
 		return nil, err
 	}
 	if n < st.Size() {
@@ -306,10 +306,10 @@ func (e *Executor) discover(ctx context.Context, source string) ([]byte, error) 
 		return nil, err
 	}
 	result := discoveryResult{Source: source, Items: []discoveryItem{}}
-	if result.Found, err = layout.found(); err != nil || !result.Found {
-		if err != nil {
-			return nil, err
-		}
+	if result.Found, err = layout.found(); err != nil {
+		return nil, err
+	}
+	if !result.Found {
 		return json.Marshal(result)
 	}
 	d := &discoverer{ctx: ctx, source: source, layout: layout}

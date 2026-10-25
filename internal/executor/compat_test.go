@@ -184,7 +184,7 @@ func TestShellStateCwdAndUTF8(t *testing.T) {
 		got.WriteString(m.GetShellStream().GetStdout().GetData())
 		return nil
 	}}
-	w := &streamWriter{out: o, kind: "stdout"}
+	w := &streamWriter{out: o, event: stdoutEvent}
 	data := []byte("hello h\u00e9llo \u4e16\u754c \U0001F30D") // 2-, 3- and 4-byte UTF-8 sequences
 	for _, b := range data {
 		w.Write([]byte{b})

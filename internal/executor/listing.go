@@ -31,7 +31,14 @@ func newNode(path string) *treeNode {
 	return &treeNode{AbsPath: path, ChildrenWereProcessed: true, FullSubtreeExtensionCounts: map[string]int32{}}
 }
 
-func nameCost(name string) int { return len(utf16.Encode([]rune(name))) }
+// nameCost is the length of name in UTF-16 code units.
+func nameCost(name string) int {
+	n := 0
+	for _, r := range name {
+		n += utf16.RuneLen(r)
+	}
+	return n
+}
 
 // extension is the key for extension counts. Like Node's path.extname, a
 // dotfile such as ".bashrc" has none.

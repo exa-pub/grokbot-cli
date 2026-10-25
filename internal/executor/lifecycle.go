@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -57,7 +56,7 @@ func sendControl(requestID string, msg *agentv1.ExecClientControlMessage, cwd *s
 // Canceled closes work canceled before an exec ID was assigned.
 func Canceled(f *aiserverv1.GrokBotUserComputerRequestFrame, sink Sink) error {
 	if f.GetExec() == nil {
-		return failure(f, 0, context.Canceled, sink)
+		return Reject(f, context.Canceled, sink)
 	}
 	return sendControl(f.RequestId, closeMessage(0), nil, sink)
 }
@@ -165,11 +164,7 @@ func marshalWithinLimit(result *agentv1.ExecClientMessage) ([]byte, error) {
 		}
 		// Escaping only grows the text, so dropping the excess bytes of the
 		// encoding from the raw content converges quickly.
-		n := max(0, len(content.Content)-max(1, len(b)-MaxJSON))
-		for n > 0 && !utf8.ValidString(content.Content[:n]) {
-			n--
-		}
-		content.Content = content.Content[:n]
+		content.Content = truncateUTF8(content.Content, max(0, len(content.Content)-max(1, len(b)-MaxJSON)))
 		read.Truncated = true
 	}
 }

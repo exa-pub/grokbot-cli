@@ -84,6 +84,9 @@ func New(root string, policy *permission.Policy) (*Executor, error) {
 	return &Executor{Root: abs, Files: files, Policy: policy, foreground: make(chan struct{}, 1)}, nil
 }
 
+// TerminalsFolder is where background command output files are written.
+func (e *Executor) TerminalsFolder() string { return filepath.Join(e.Root, terminalsDir) }
+
 // Close releases the root directory handle.
 func (e *Executor) Close() error { return e.Files.Close() }
 
@@ -132,14 +135,10 @@ func (e *Executor) cwd(path string) (dir, warning string, err error) {
 
 // Reject answers f with err in the form the request type expects.
 func Reject(f *aiserverv1.GrokBotUserComputerRequestFrame, err error, sink Sink) error {
-	return failure(f, 0, err, sink)
-}
-
-func failure(f *aiserverv1.GrokBotUserComputerRequestFrame, execID uint32, err error, sink Sink) error {
 	resp := &aiserverv1.GrokBotUserComputerResponseFrame{RequestId: f.RequestId}
 	switch {
 	case f.GetExec() != nil:
-		return sendControl(f.RequestId, throwMessage(execID, err), nil, sink)
+		return sendControl(f.RequestId, throwMessage(0, err), nil, sink)
 	case f.GetMessagesOp() != nil:
 		resp.Frame = &aiserverv1.GrokBotUserComputerResponseFrame_MessagesError{
 			MessagesError: &aiserverv1.GrokBotUserComputerMessagesError{Error: err.Error()},
@@ -190,8 +189,15 @@ type request struct {
 	approved bool                       // authorized by the server
 }
 
+// authorization is implemented by every request type the server can authorize.
+type authorization interface {
+	GetAuthorizedByApproval() bool
+	GetAuthorizedByStanding() bool
+}
+
 func parse(f *aiserverv1.GrokBotUserComputerRequestFrame) (request, error) {
 	r := request{msg: &agentv1.ExecServerMessage{}}
+	var auth authorization
 	switch v := f.Frame.(type) {
 	case *aiserverv1.GrokBotUserComputerRequestFrame_Exec:
 		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal([]byte(v.Exec.ServerMessageJson), r.msg); err != nil {
@@ -200,23 +206,24 @@ func parse(f *aiserverv1.GrokBotUserComputerRequestFrame) (request, error) {
 		if r.action = describe(r.msg); r.action == "" {
 			r.action = "Execute unsupported local tool"
 		}
-		r.approved = v.Exec.AuthorizedByApproval || v.Exec.AuthorizedByStanding
+		auth = v.Exec
 	case *aiserverv1.GrokBotUserComputerRequestFrame_Upload:
 		r.action = "Write " + v.Upload.Path
-		r.approved = v.Upload.AuthorizedByApproval || v.Upload.AuthorizedByStanding
+		auth = v.Upload
 	case *aiserverv1.GrokBotUserComputerRequestFrame_DiscoverAiTool:
 		source := v.DiscoverAiTool.Source
 		if source != sourceCodex && source != sourceClaudeCode {
 			return r, errUnsupportedSource
 		}
 		r.action = "Read AI tool setup and recent history for " + source + " in the home/config directories (may be outside root)"
-		r.approved = v.DiscoverAiTool.AuthorizedByApproval || v.DiscoverAiTool.AuthorizedByStanding
+		auth = v.DiscoverAiTool
 	case *aiserverv1.GrokBotUserComputerRequestFrame_Download:
 		r.action = "Read " + v.Download.Path
-		r.approved = v.Download.AuthorizedByApproval || v.Download.AuthorizedByStanding
+		auth = v.Download
 	default:
 		return r, errors.New("unsupported on Linux")
 	}
+	r.approved = auth.GetAuthorizedByApproval() || auth.GetAuthorizedByStanding()
 	return r, nil
 }
 
@@ -235,7 +242,7 @@ func (e *Executor) Handle(ctx context.Context, f *aiserverv1.GrokBotUserComputer
 		err = e.Policy.Allow(ctx, req.action, server, req.approved)
 	}
 	if err != nil {
-		return failure(f, 0, err, sink)
+		return Reject(f, err, sink)
 	}
 	if ctx.Err() != nil {
 		return Canceled(f, sink)
@@ -243,15 +250,13 @@ func (e *Executor) Handle(ctx context.Context, f *aiserverv1.GrokBotUserComputer
 	if f.GetExec() != nil {
 		return e.controlled(ctx, f, req.msg, sink)
 	}
-	if err = e.run(ctx, f, req.msg, sink); err != nil {
-		return failure(f, 0, err, sink)
+	if err = e.run(ctx, f, sink); err != nil {
+		return Reject(f, err, sink)
 	}
 	return nil
 }
 
-func (e *Executor) run(
-	ctx context.Context, f *aiserverv1.GrokBotUserComputerRequestFrame, msg *agentv1.ExecServerMessage, sink Sink,
-) error {
+func (e *Executor) run(ctx context.Context, f *aiserverv1.GrokBotUserComputerRequestFrame, sink Sink) error {
 	switch v := f.Frame.(type) {
 	case *aiserverv1.GrokBotUserComputerRequestFrame_Upload:
 		if err := e.upload(v.Upload.Path, v.Upload.Data); err != nil {

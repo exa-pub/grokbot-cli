@@ -272,7 +272,7 @@ func (e *Executor) readAll(rel string) ([]byte, error) {
 
 // decodeFile decodes text, keeping the envelope of terminal files as UTF-8.
 func decodeFile(rel string, b []byte, hint string) (string, error) {
-	if filepath.Dir(rel) == terminalsDir && terminalMetadata(b) != nil {
+	if filepath.Dir(rel) == terminalsDir && terminalHeaderEnd(b) >= 0 {
 		return decodeTerminalText(b, hint)
 	}
 	return decodeText(b, hint)
@@ -289,13 +289,21 @@ func setTextRange(r *agentv1.ReadSuccess, text string, x *agentv1.ReadArgs) {
 	r.TotalLines = int32(min(len(lines), math.MaxInt32)) //nolint:gosec // clamped
 	r.RangeApplied = (x.Offset != nil || x.Limit != nil) && text != "" && (x.Offset == nil || int(x.GetOffset()) <= len(lines))
 	if len(content) > maxTextRead {
-		content = content[:maxTextRead]
-		for !utf8.ValidString(content) {
-			content = content[:len(content)-1]
-		}
+		content = truncateUTF8(content, maxTextRead)
 		r.Truncated = true
 	}
 	r.Output = &agentv1.ReadSuccess_Content{Content: content}
+}
+
+// truncateUTF8 cuts s to at most n bytes at a rune boundary.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // decodeText decodes b using the encoding hint. Without a hint it honors a

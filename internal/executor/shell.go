@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -225,7 +224,7 @@ func shellMessage(s *agentv1.ShellStream) *agentv1.ExecClientMessage {
 
 // background starts cmd in its own session with output going to a terminal
 // file. It does not wait for running foreground commands.
-func (e *Executor) background(cmd, path string) (*agentv1.BackgroundShellSpawnSuccess, error) {
+func (e *Executor) background(cmd, path string) (_ *agentv1.BackgroundShellSpawnSuccess, err error) {
 	st := e.shellState()
 	cwd, _, err := e.shellCwd(path, st)
 	if err != nil {
@@ -235,16 +234,19 @@ func (e *Executor) background(cmd, path string) (*agentv1.BackgroundShellSpawnSu
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			closeLogged(f)
+		}
+	}()
 	gate, release, err := os.Pipe()
 	if err != nil {
-		closeLogged(f)
 		return nil, err
 	}
 	defer gate.Close()
 	defer release.Close()
 	command, err := tempFile("grok-command-", cmd)
 	if err != nil {
-		closeLogged(f)
 		return nil, err
 	}
 	defer closeLogged(command) // the child keeps its own descriptor
@@ -254,7 +256,6 @@ func (e *Executor) background(cmd, path string) (*agentv1.BackgroundShellSpawnSu
 	c.Stdout = f
 	c.Stderr = f
 	if err = c.Start(); err != nil {
-		closeLogged(f)
 		return nil, err
 	}
 	if err = writeTerminalHeader(f, cwd, cmd, c.Process.Pid); err == nil {
@@ -263,7 +264,6 @@ func (e *Executor) background(cmd, path string) (*agentv1.BackgroundShellSpawnSu
 	if err != nil {
 		kill(c)
 		wait(c)
-		closeLogged(f)
 		return nil, err
 	}
 	go func() {
@@ -286,14 +286,16 @@ type shellOutput struct {
 	err      error // first send failure
 }
 
-func (o *shellOutput) emit(kind, data string) error {
-	stream := &agentv1.ShellStream{}
-	if kind == "stdout" {
-		stream.Event = &agentv1.ShellStream_Stdout{Stdout: &agentv1.ShellStreamStdout{Data: data}}
-	} else {
-		stream.Event = &agentv1.ShellStream_Stderr{Stderr: &agentv1.ShellStreamStderr{Data: data}}
-	}
-	return o.send(shellMessage(stream))
+func stdoutEvent(data string) *agentv1.ShellStream {
+	return &agentv1.ShellStream{Event: &agentv1.ShellStream_Stdout{Stdout: &agentv1.ShellStreamStdout{Data: data}}}
+}
+
+func stderrEvent(data string) *agentv1.ShellStream {
+	return &agentv1.ShellStream{Event: &agentv1.ShellStream_Stderr{Stderr: &agentv1.ShellStreamStderr{Data: data}}}
+}
+
+func (o *shellOutput) emit(event func(string) *agentv1.ShellStream, data string) error {
+	return o.send(shellMessage(event(data)))
 }
 
 func (o *shellOutput) sendErr() error {
@@ -306,7 +308,7 @@ func (o *shellOutput) sendErr() error {
 // sequence until the rest of it arrives.
 type streamWriter struct {
 	out     *shellOutput
-	kind    string // "stdout" or "stderr"
+	event   func(string) *agentv1.ShellStream // stdoutEvent or stderrEvent
 	partial []byte
 }
 
@@ -330,7 +332,7 @@ func (w *streamWriter) Write(b []byte) (int, error) {
 	w.partial = append([]byte(nil), data[n:]...)
 	for data = data[:n]; len(data) > 0; {
 		n := chunkLen(data)
-		if err := o.emit(w.kind, strings.ToValidUTF8(string(data[:n]), "�")); err != nil {
+		if err := o.emit(w.event, strings.ToValidUTF8(string(data[:n]), "�")); err != nil {
 			o.err = err
 			break
 		}
@@ -344,7 +346,7 @@ func (w *streamWriter) flush() {
 	w.out.mu.Lock()
 	defer w.out.mu.Unlock()
 	if len(w.partial) > 0 && !w.out.detached && w.out.err == nil {
-		w.out.err = w.out.emit(w.kind, strings.ToValidUTF8(string(w.partial), "�"))
+		w.out.err = w.out.emit(w.event, strings.ToValidUTF8(string(w.partial), "�"))
 	}
 	w.partial = nil
 }
@@ -411,8 +413,7 @@ func (e *Executor) shell(ctx context.Context, x *agentv1.ShellArgs, send reply) 
 		return err
 	}
 	if warning != "" {
-		stderr := &agentv1.ShellStream_Stderr{Stderr: &agentv1.ShellStreamStderr{Data: warning}}
-		if err = send(shellMessage(&agentv1.ShellStream{Event: stderr})); err != nil {
+		if err = send(shellMessage(stderrEvent(warning))); err != nil {
 			return err
 		}
 	}
@@ -457,9 +458,13 @@ func (sh *runningShell) canBackground() bool {
 	return sh.args.TimeoutBehavior == agentv1.TimeoutBehavior_TIMEOUT_BEHAVIOR_BACKGROUND
 }
 
-func (e *Executor) startShell(x *agentv1.ShellArgs, cwd string, st shellState, send reply) (*runningShell, error) {
+func (e *Executor) startShell(x *agentv1.ShellArgs, cwd string, st shellState, send reply) (_ *runningShell, err error) {
 	sh := &runningShell{args: x, cwd: cwd, out: &shellOutput{send: send}, done: make(chan struct{})}
-	var err error
+	defer func() {
+		if err != nil {
+			sh.closeFiles()
+		}
+	}()
 	if sh.canBackground() {
 		if sh.shellID, sh.file, err = e.terminal(); err != nil {
 			return nil, err
@@ -467,31 +472,27 @@ func (e *Executor) startShell(x *agentv1.ShellArgs, cwd string, st shellState, s
 		sh.out.file = sh.file
 	}
 	if sh.snapshot, err = tempFile("grok-shell-state-", ""); err != nil {
-		sh.closeFiles()
 		return nil, err
 	}
 	replay, err := tempFile("grok-shell-replay-", st.replayScript())
 	if err != nil {
-		sh.closeFiles()
 		return nil, err
 	}
 	defer closeLogged(replay) // the child keeps its own descriptor
 	command, err := tempFile("grok-command-", x.Command)
 	if err != nil {
-		sh.closeFiles()
 		return nil, err
 	}
 	defer closeLogged(command)
 	sh.cmd = shellCommand(st, cwd, "-lc", foregroundScript, "grokbot-shell")
 	sh.cmd.ExtraFiles = []*os.File{sh.snapshot, replay, command}
 	sh.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	sh.stdout = &streamWriter{out: sh.out, kind: "stdout"}
-	sh.stderr = &streamWriter{out: sh.out, kind: "stderr"}
+	sh.stdout = &streamWriter{out: sh.out, event: stdoutEvent}
+	sh.stderr = &streamWriter{out: sh.out, event: stderrEvent}
 	sh.cmd.Stdout = sh.stdout
 	sh.cmd.Stderr = sh.stderr
 	sh.cmd.WaitDelay = waitDelay
 	if err = sh.start(); err != nil {
-		sh.closeFiles()
 		return nil, err
 	}
 	go sh.reap()
@@ -614,12 +615,11 @@ func (sh *runningShell) finish(reason agentv1.ShellAbortReason) error {
 
 // snapshotCwd returns the cwd recorded in a state snapshot, or "".
 func snapshotCwd(f *os.File) string {
-	b := make([]byte, 4096)
-	n, err := f.ReadAt(b, 0)
-	if err != nil && !errors.Is(err, io.EOF) {
+	b, err := readAtMost(f, 4096, 0)
+	if err != nil {
 		return ""
 	}
-	cwd, _, found := bytes.Cut(b[:n], []byte{0})
+	cwd, _, found := bytes.Cut(b, []byte{0})
 	if !found {
 		return ""
 	}
@@ -656,11 +656,7 @@ func readSnapshot(f *os.File) ([]byte, error) {
 	if info.Size() > maxSnapshot {
 		return nil, errors.New("shell state exceeds 1 MiB")
 	}
-	b := make([]byte, info.Size())
-	if _, err := f.ReadAt(b, 0); err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-	return b, nil
+	return readAtMost(f, info.Size(), 0)
 }
 
 // parseSnapshot decodes the state written by saveStateTrap.

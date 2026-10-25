@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"math/rand/v2"
-	"path/filepath"
 	"slices"
 	"time"
 
@@ -112,7 +111,7 @@ func (pv *Provider) hello(c config.Computer, standing string) *aiserverv1.GrokBo
 	return &aiserverv1.GrokBotUserComputerHello{
 		Label:               pv.Machine.Label,
 		LocalRoot:           pv.Executor.Root,
-		TerminalsFolder:     filepath.Join(pv.Executor.Root, "terminals"),
+		TerminalsFolder:     pv.Executor.TerminalsFolder(),
 		Standing:            standing,
 		Variant:             "sand",
 		ServerAuthoritative: c.ServerAuthoritative,
@@ -260,6 +259,16 @@ func (s *session) queueSink(f *responseFrame) error {
 	return nil
 }
 
+// take queues a reply unless its request was canceled. It reports whether
+// a full batch is pending.
+func (s *session) take(f *responseFrame) bool {
+	if s.dropped(f) {
+		return false
+	}
+	s.queue(f)
+	return len(s.pending) >= submitBatch
+}
+
 // reject answers a request that will not run.
 func (s *session) reject(f *requestFrame, reason error) {
 	if err := executor.Reject(f, reason, s.queueSink); err != nil {
@@ -315,11 +324,7 @@ func (s *session) run(ctx context.Context) error {
 }
 
 func (s *session) onReply(ctx context.Context, f *responseFrame) error {
-	if s.dropped(f) {
-		return nil
-	}
-	s.queue(f)
-	if len(s.pending) < submitBatch {
+	if !s.take(f) {
 		return nil
 	}
 	return s.flush(ctx)
@@ -428,13 +433,18 @@ func (s *session) onTick(ctx context.Context) error {
 	return nil
 }
 
-// dropStaleWatch abandons a silent stream and schedules a reconnect.
-func (s *session) dropStaleWatch() {
+// stopWatch cancels the watch stream and ignores its cancellation event.
+func (s *session) stopWatch() {
 	if s.watchCancel != nil {
 		s.watchCancel()
 	}
-	s.generation++ // ignore the cancellation event
+	s.generation++
 	s.watchAlive = false
+}
+
+// dropStaleWatch abandons a silent stream and schedules a reconnect.
+func (s *session) dropStaleWatch() {
+	s.stopWatch()
 	s.nextDial = s.now().Add(staleRedial + s.jitter(s.backoff))
 	s.increaseBackoff()
 }
@@ -472,10 +482,7 @@ func (s *session) ensureCredential(ctx context.Context) (bool, error) {
 
 // startWatch replaces the watch stream with a new one for the current credential.
 func (s *session) startWatch() {
-	if s.watchCancel != nil {
-		s.watchCancel()
-	}
-	s.generation++
+	s.stopWatch()
 	gen := s.generation
 	ctx, cancel := context.WithCancel(s.work)
 	s.watchCancel = cancel
@@ -550,11 +557,7 @@ func (s *session) invalidate(err error) {
 			log.Printf("forget computer credential: %v", err)
 		}
 	}
-	s.generation++ // ignore the cancellation event from the rejected stream
-	if s.watchCancel != nil {
-		s.watchCancel()
-	}
-	s.watchAlive = false
+	s.stopWatch()
 	s.nextDial = s.now()
 }
 
@@ -717,11 +720,7 @@ func (s *session) awaitWorkers(ctx context.Context) bool {
 	for s.active > 0 {
 		select {
 		case f := <-s.replies:
-			if s.dropped(f) {
-				continue
-			}
-			s.queue(f)
-			if len(s.pending) < submitBatch {
+			if !s.take(f) {
 				continue
 			}
 			if err := s.submit(ctx); err != nil {
@@ -741,9 +740,7 @@ func (s *session) drainReplies() {
 	for {
 		select {
 		case f := <-s.replies:
-			if !s.dropped(f) {
-				s.queue(f)
-			}
+			s.take(f)
 		default:
 			return
 		}

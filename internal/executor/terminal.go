@@ -37,8 +37,6 @@ const (
 	envelopeEnd     = "\n---\n"
 	exitMarker      = "\n---\nexit_code: "
 	errorMarker     = "\n---\nerror: "
-	// The status field is padded so it can be rewritten in place.
-	runningStatus = "status: running  "
 	// Only this much of the file's head and tail is inspected.
 	envelopeWindow = 4096
 )
@@ -58,6 +56,9 @@ func (e *Executor) terminal() (uint32, *os.File, error) {
 	}
 }
 
+// statusField pads the status so it can be rewritten in place.
+func statusField(status string) string { return fmt.Sprintf("status: %-9s", status) }
+
 func terminalHeader(cwd, command string, pid int, started time.Time) string {
 	var b strings.Builder
 	b.WriteString(envelopeStart)
@@ -66,7 +67,7 @@ func terminalHeader(cwd, command string, pid int, started time.Time) string {
 	}
 	fmt.Fprintf(&b, "cwd: %s\n", strconv.Quote(cwd))
 	fmt.Fprintf(&b, "command: %s\n", strconv.Quote(command))
-	fmt.Fprintf(&b, "status: %-9s\n", "running")
+	b.WriteString(statusField("running") + "\n")
 	fmt.Fprintf(&b, "started_at: %s\n", started.UTC().Format(timestampFormat))
 	fmt.Fprintf(&b, "running_for_ms: %-9d\n", 0)
 	b.WriteString("---\n")
@@ -119,8 +120,8 @@ func appendTerminalExit(f *os.File, state *os.ProcessState) error {
 	if code != 0 {
 		status = "failed"
 	}
-	if i := bytes.Index(head[:headerEnd], []byte(runningStatus)); i >= 0 {
-		if _, err := f.WriteAt(fmt.Appendf(nil, "status: %-9s", status), int64(i)); err != nil {
+	if i := bytes.Index(head[:headerEnd], []byte(statusField("running"))); i >= 0 {
+		if _, err := f.WriteAt([]byte(statusField(status)), int64(i)); err != nil {
 			return err
 		}
 	}
@@ -166,14 +167,24 @@ func terminalMetadata(b []byte) *agentv1.TerminalMetadata {
 }
 
 func terminalHeaderBody(b []byte) (string, bool) {
-	if !bytes.HasPrefix(b, []byte(envelopeStart)) {
-		return "", false
-	}
-	end := bytes.Index(b[len(envelopeStart):], []byte(envelopeEnd))
+	end := terminalHeaderEnd(b)
 	if end < 0 {
 		return "", false
 	}
-	return string(b[len(envelopeStart) : len(envelopeStart)+end]), true
+	return string(b[len(envelopeStart) : end-len(envelopeEnd)]), true
+}
+
+// terminalHeaderEnd returns the offset just past the header of a terminal
+// file, or -1 if b has none.
+func terminalHeaderEnd(b []byte) int {
+	if !bytes.HasPrefix(b, []byte(envelopeStart)) {
+		return -1
+	}
+	i := bytes.Index(b[len(envelopeStart):], []byte(envelopeEnd))
+	if i < 0 {
+		return -1
+	}
+	return len(envelopeStart) + i + len(envelopeEnd)
 }
 
 func terminalExitCode(b []byte) (int32, bool) {
@@ -192,12 +203,7 @@ func terminalExitCode(b []byte) (int32, bool) {
 // decodeTerminalText decodes the output of a terminal file with hint while
 // keeping the UTF-8 header and footer intact.
 func decodeTerminalText(b []byte, hint string) (string, error) {
-	start := 0
-	if bytes.HasPrefix(b, []byte(envelopeStart)) {
-		if i := bytes.Index(b[len(envelopeStart):], []byte(envelopeEnd)); i >= 0 {
-			start = len(envelopeStart) + i + len(envelopeEnd)
-		}
-	}
+	start := max(terminalHeaderEnd(b), 0)
 	end := len(b)
 	i := max(bytes.LastIndex(b, []byte(exitMarker)), bytes.LastIndex(b, []byte(errorMarker)))
 	if i >= start && bytes.HasSuffix(b, []byte(envelopeEnd)) {
