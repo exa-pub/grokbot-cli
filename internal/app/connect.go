@@ -8,13 +8,13 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/exa-pub/grokbot-cli/internal/auth"
-	"github.com/exa-pub/grokbot-cli/internal/computer"
-	"github.com/exa-pub/grokbot-cli/internal/config"
-	"github.com/exa-pub/grokbot-cli/internal/executor"
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
-	rpc "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1/aiserverv1connect"
-	"github.com/exa-pub/grokbot-cli/internal/permission"
+	"github.com/exa-pub/grokbot-tunnel/internal/auth"
+	"github.com/exa-pub/grokbot-tunnel/internal/computer"
+	"github.com/exa-pub/grokbot-tunnel/internal/config"
+	"github.com/exa-pub/grokbot-tunnel/internal/executor"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
+	rpc "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1/aiserverv1connect"
+	"github.com/exa-pub/grokbot-tunnel/internal/permission"
 )
 
 // ConnectOptions configure Connect.
@@ -53,7 +53,7 @@ func Connect(ctx context.Context, opts ConnectOptions) error {
 	}
 	var identity config.Auth
 	if err = e.store.Load("auth", &identity); err != nil {
-		return fmt.Errorf("load authentication (run grokbot-cli login): %w", err)
+		return fmt.Errorf("load authentication (run grokbot-tunnel login): %w", err)
 	}
 	if opts.Label != "" {
 		e.machine.Label = opts.Label

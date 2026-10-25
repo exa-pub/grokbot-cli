@@ -16,9 +16,9 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
-	"github.com/exa-pub/grokbot-cli/internal/permission"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
+	"github.com/exa-pub/grokbot-tunnel/internal/permission"
 )
 
 // Size limits for files and for a single exec result message.

@@ -18,9 +18,9 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
-	rpc "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1/aiserverv1connect"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
+	rpc "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1/aiserverv1connect"
 )
 
 type localCloud struct {

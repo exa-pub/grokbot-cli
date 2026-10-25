@@ -11,10 +11,10 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/exa-pub/grokbot-cli/internal/auth"
-	"github.com/exa-pub/grokbot-cli/internal/client"
-	"github.com/exa-pub/grokbot-cli/internal/config"
-	rpc "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1/aiserverv1connect"
+	"github.com/exa-pub/grokbot-tunnel/internal/auth"
+	"github.com/exa-pub/grokbot-tunnel/internal/client"
+	"github.com/exa-pub/grokbot-tunnel/internal/config"
+	rpc "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1/aiserverv1connect"
 )
 
 const (

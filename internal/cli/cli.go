@@ -1,4 +1,4 @@
-// Package cli defines the grokbot-cli command line.
+// Package cli defines the grokbot-tunnel command line.
 package cli
 
 import (
@@ -7,13 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/exa-pub/grokbot-cli/internal/app"
-	"github.com/exa-pub/grokbot-cli/internal/client"
-	"github.com/exa-pub/grokbot-cli/internal/permission"
+	"github.com/exa-pub/grokbot-tunnel/internal/app"
+	"github.com/exa-pub/grokbot-tunnel/internal/client"
+	"github.com/exa-pub/grokbot-tunnel/internal/permission"
 )
 
 // version is the release version, set at build time with
-// -ldflags "-X github.com/exa-pub/grokbot-cli/internal/cli.version=v1.2.3".
+// -ldflags "-X github.com/exa-pub/grokbot-tunnel/internal/cli.version=v1.2.3".
 var version = "dev"
 
 // Execute parses args and runs the selected command.
@@ -26,7 +26,7 @@ func Execute(ctx context.Context, args []string) error {
 func newRootCommand() *cobra.Command {
 	var clientVersion string
 	root := &cobra.Command{
-		Use:           "grokbot-cli",
+		Use:           "grokbot-tunnel",
 		Short:         "Run Grok Bot agent requests on this computer",
 		Version:       version,
 		Args:          cobra.NoArgs,
@@ -37,7 +37,7 @@ func newRootCommand() *cobra.Command {
 			return fmt.Errorf("missing command\n\n%s", cmd.UsageString())
 		},
 	}
-	root.SetVersionTemplate("grokbot-cli {{.Version}} (Sand protocol " + client.Version + ")\n")
+	root.SetVersionTemplate("grokbot-tunnel {{.Version}} (Sand protocol " + client.Version + ")\n")
 	root.PersistentFlags().StringVar(&clientVersion, "client-version",
 		app.Env("SAND_CLIENT_APP_VERSION", client.Version), "Sand client version header")
 	root.AddCommand(newLoginCommand(&clientVersion), newConnectCommand(&clientVersion))

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Installs the latest grokbot-cli release.
+# Installs the latest grokbot-tunnel release.
 #
-#   curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-cli/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | sh
 #
 # GROKBOT_VERSION    release tag to install, e.g. v0.1.0 (default: latest)
 # GROKBOT_INSTALL_DIR  target directory (default: /usr/local/bin if writable
@@ -9,8 +9,8 @@
 # GROKBOT_SKIP_CHECKSUM=1  install without verifying checksums.txt
 set -eu
 
-REPO="exa-pub/grokbot-cli"
-BINARY="grokbot-cli"
+REPO="exa-pub/grokbot-tunnel"
+BINARY="grokbot-tunnel"
 
 if [ -t 2 ]; then
   BOLD='\033[1m' RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[0;33m' RESET='\033[0m'

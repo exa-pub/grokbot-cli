@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf16"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
 )
 
 type treeNode = agentv1.LsDirectoryTreeNode

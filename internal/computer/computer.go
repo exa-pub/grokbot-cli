@@ -16,13 +16,13 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/exa-pub/grokbot-cli/internal/auth"
-	"github.com/exa-pub/grokbot-cli/internal/config"
-	"github.com/exa-pub/grokbot-cli/internal/executor"
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
-	rpc "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1/aiserverv1connect"
-	"github.com/exa-pub/grokbot-cli/internal/permission"
+	"github.com/exa-pub/grokbot-tunnel/internal/auth"
+	"github.com/exa-pub/grokbot-tunnel/internal/config"
+	"github.com/exa-pub/grokbot-tunnel/internal/executor"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
+	rpc "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1/aiserverv1connect"
+	"github.com/exa-pub/grokbot-tunnel/internal/permission"
 )
 
 const (

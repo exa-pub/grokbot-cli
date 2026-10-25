@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/exa-pub/grokbot-cli/internal/config"
+	"github.com/exa-pub/grokbot-tunnel/internal/config"
 )
 
 // ClientID is the OAuth client used for token refresh.
@@ -326,8 +326,8 @@ func (s *TokenSource) reload() (onDisk string, persist bool) {
 
 // Errors after which no token can be obtained until the user logs in again.
 var (
-	ErrLogout      = errors.New("session revoked; run grokbot-cli login")
-	ErrNotLoggedIn = errors.New("not logged in; run grokbot-cli login")
+	ErrLogout      = errors.New("session revoked; run grokbot-tunnel login")
+	ErrNotLoggedIn = errors.New("not logged in; run grokbot-tunnel login")
 )
 
 // refresh exchanges a refresh token for new tokens. The refresh token in the

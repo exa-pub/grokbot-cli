@@ -134,7 +134,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/exa-pub/grokbot-cli
+        - github.com/exa-pub/grokbot-tunnel
   exclusions:
     generated: strict
     paths:

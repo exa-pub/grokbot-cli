@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
-	"github.com/exa-pub/grokbot-cli/internal/permission"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
+	"github.com/exa-pub/grokbot-tunnel/internal/permission"
 )
 
 func setup(t *testing.T) *Executor {

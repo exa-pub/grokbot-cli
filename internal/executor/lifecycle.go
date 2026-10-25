@@ -11,8 +11,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
 )
 
 // errUnsupportedExec matches the desktop daemon's message for unknown requests.

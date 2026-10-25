@@ -12,8 +12,8 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/exa-pub/grokbot-cli/internal/auth"
-	"github.com/exa-pub/grokbot-cli/internal/config"
+	"github.com/exa-pub/grokbot-tunnel/internal/auth"
+	"github.com/exa-pub/grokbot-tunnel/internal/config"
 )
 
 // Version is the Sand desktop version whose protocol this client speaks.

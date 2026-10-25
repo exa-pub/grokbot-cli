@@ -1,19 +1,19 @@
-# grokbot-cli
+# grokbot-tunnel
 
-grokbot-cli connects a Linux computer to Grok Bot so that the cloud agent can
+grokbot-tunnel connects a Linux computer to Grok Bot so that the cloud agent can
 run commands and work with files on it. It speaks the protocol of the Grok Bot
 0.75.8 desktop client.
 
 ## Installation
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-cli/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | sh
 ```
 
 The script installs the latest release to `/usr/local/bin` or, without sudo,
 to `~/.local/bin`. Set `GROKBOT_VERSION` or `GROKBOT_INSTALL_DIR` to change
 that. You can also download the binary from
-[Releases](https://github.com/exa-pub/grokbot-cli/releases) or
+[Releases](https://github.com/exa-pub/grokbot-tunnel/releases) or
 [build from source](CONTRIBUTING.md).
 
 Requirements:
@@ -24,7 +24,7 @@ Requirements:
 ## Login
 
 ```sh
-grokbot-cli login
+grokbot-tunnel login
 ```
 
 `login` opens the sign-in page in the browser.
@@ -36,7 +36,7 @@ grokbot-cli login
 ## Connecting
 
 ```sh
-grokbot-cli connect --root "$HOME/projects"
+grokbot-tunnel connect --root "$HOME/projects"
 ```
 
 `connect` runs the agent's requests until you press Ctrl-C.
@@ -84,7 +84,7 @@ the actions Grok Bot approved. The `never` mode still refuses all actions.
   The commands themselves run with your privileges and can access any file.
 - Codex and Claude Code settings are read from the home directory, even if it
   is outside `--root`.
-- Tokens are stored unencrypted in `~/.grok/bot-cli/`. Only the owner can
+- Tokens are stored unencrypted in `~/.grok/bot-tunnel/`. Only the owner can
   access that directory.
 - `connect --debug` prints the agent's requests in full, including commands
   and file contents.

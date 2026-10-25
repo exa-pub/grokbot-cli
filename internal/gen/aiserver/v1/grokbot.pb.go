@@ -3372,7 +3372,7 @@ const file_aiserver_v1_grokbot_proto_rawDesc = "" +
 	"\x10DashboardService\x12e\n" +
 	"\x12GetUserPrivacyMode\x12&.aiserver.v1.GetUserPrivacyModeRequest\x1a'.aiserver.v1.GetUserPrivacyModeResponse\x12>\n" +
 	"\x05GetMe\x12\x19.aiserver.v1.GetMeRequest\x1a\x1a.aiserver.v1.GetMeResponse\x12h\n" +
-	"\x13RegisterSandMachine\x12'.aiserver.v1.RegisterSandMachineRequest\x1a(.aiserver.v1.RegisterSandMachineResponseBDZBgithub.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1;aiserverv1b\x06proto3"
+	"\x13RegisterSandMachine\x12'.aiserver.v1.RegisterSandMachineRequest\x1a(.aiserver.v1.RegisterSandMachineResponseBGZEgithub.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1;aiserverv1b\x06proto3"
 
 var (
 	file_aiserver_v1_grokbot_proto_rawDescOnce sync.Once

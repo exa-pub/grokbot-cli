@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
 )
 
 // background starts cmd in its own session with output going to a terminal

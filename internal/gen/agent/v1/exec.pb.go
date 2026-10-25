@@ -4076,7 +4076,7 @@ const file_agent_v1_exec_proto_rawDesc = "" +
 	"\x0fTimeoutBehavior\x12 \n" +
 	"\x1cTIMEOUT_BEHAVIOR_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17TIMEOUT_BEHAVIOR_CANCEL\x10\x01\x12\x1f\n" +
-	"\x1bTIMEOUT_BEHAVIOR_BACKGROUND\x10\x02B>Z<github.com/exa-pub/grokbot-cli/internal/gen/agent/v1;agentv1b\x06proto3"
+	"\x1bTIMEOUT_BEHAVIOR_BACKGROUND\x10\x02BAZ?github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_agent_v1_exec_proto_rawDescOnce sync.Once

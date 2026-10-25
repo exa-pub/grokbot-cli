@@ -7,7 +7,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
 )
 
 func shellMessage(s *agentv1.ShellStream) *agentv1.ExecClientMessage {

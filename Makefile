@@ -1,5 +1,5 @@
-BINARY    := grokbot-cli
-PKG       := github.com/exa-pub/grokbot-cli
+BINARY    := grokbot-tunnel
+PKG       := github.com/exa-pub/grokbot-tunnel
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS   := -s -w -X $(PKG)/internal/cli.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64
@@ -11,16 +11,16 @@ all: lint test build
 
 # --- Build ---
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY) ./cmd/grokbot-cli
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/$(BINARY) ./cmd/grokbot-tunnel
 
-# Release archives dist/grokbot-cli-<os>-<arch>.tar.gz and dist/checksums.txt.
+# Release archives dist/grokbot-tunnel-<os>-<arch>.tar.gz and dist/checksums.txt.
 dist:
 	rm -rf dist && mkdir -p dist
 	@for platform in $(PLATFORMS); do \
 		os=$${platform%/*}; arch=$${platform#*/}; name=$(BINARY)-$$os-$$arch; \
 		echo "build $$name $(VERSION)"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
-			go build -trimpath -ldflags="$(LDFLAGS)" -o dist/$$name ./cmd/grokbot-cli || exit 1; \
+			go build -trimpath -ldflags="$(LDFLAGS)" -o dist/$$name ./cmd/grokbot-tunnel || exit 1; \
 		tar -C dist -czf dist/$$name.tar.gz $$name || exit 1; \
 		rm dist/$$name; \
 	done

@@ -21,7 +21,7 @@ func run(t *testing.T, args ...string) (string, error) {
 
 func TestVersion(t *testing.T) {
 	out, err := run(t, "--version")
-	if err != nil || out != "grokbot-cli dev (Sand protocol 0.75.8)\n" {
+	if err != nil || out != "grokbot-tunnel dev (Sand protocol 0.75.8)\n" {
 		t.Fatal(out, err)
 	}
 }

@@ -14,11 +14,11 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/exa-pub/grokbot-cli/internal/config"
-	"github.com/exa-pub/grokbot-cli/internal/executor"
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
-	rpc "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1/aiserverv1connect"
-	"github.com/exa-pub/grokbot-cli/internal/permission"
+	"github.com/exa-pub/grokbot-tunnel/internal/config"
+	"github.com/exa-pub/grokbot-tunnel/internal/executor"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
+	rpc "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1/aiserverv1connect"
+	"github.com/exa-pub/grokbot-tunnel/internal/permission"
 )
 
 type fakeCloud struct {

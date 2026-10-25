@@ -1,4 +1,4 @@
-// Command grokbot-cli connects this computer to Grok Bot.
+// Command grokbot-tunnel connects this computer to Grok Bot.
 package main
 
 import (
@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/exa-pub/grokbot-cli/internal/cli"
+	"github.com/exa-pub/grokbot-tunnel/internal/cli"
 )
 
 func main() {

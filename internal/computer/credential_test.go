@@ -11,10 +11,10 @@ import (
 
 	"connectrpc.com/connect"
 
-	"github.com/exa-pub/grokbot-cli/internal/auth"
-	"github.com/exa-pub/grokbot-cli/internal/config"
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
-	rpc "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1/aiserverv1connect"
+	"github.com/exa-pub/grokbot-tunnel/internal/auth"
+	"github.com/exa-pub/grokbot-tunnel/internal/config"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
+	rpc "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1/aiserverv1connect"
 )
 
 // tickWatch is tick that also applies the end of a watch stream that fails

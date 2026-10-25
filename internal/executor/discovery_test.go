@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
 )
 
 func discoverySetup(t *testing.T) *Executor {

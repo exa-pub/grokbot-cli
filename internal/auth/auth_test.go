@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/exa-pub/grokbot-cli/internal/config"
+	"github.com/exa-pub/grokbot-tunnel/internal/config"
 )
 
 func TestPKCE(t *testing.T) {

@@ -79,8 +79,8 @@ jobs:
 
       - name: Smoke test
         run: |
-          tar -xzf dist/grokbot-cli-linux-amd64.tar.gz -C "${RUNNER_TEMP}"
-          "${RUNNER_TEMP}/grokbot-cli-linux-amd64" --version
+          tar -xzf dist/grokbot-tunnel-linux-amd64.tar.gz -C "${RUNNER_TEMP}"
+          "${RUNNER_TEMP}/grokbot-tunnel-linux-amd64" --version
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

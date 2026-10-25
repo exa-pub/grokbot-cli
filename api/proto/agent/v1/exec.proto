@@ -1,6 +1,6 @@
 syntax = "proto3";
 package agent.v1;
-option go_package = "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1;agentv1";
+option go_package = "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1;agentv1";
 message ExecClientControlMessage {
   oneof message {
     .agent.v1.ExecClientStreamClose stream_close = 1;

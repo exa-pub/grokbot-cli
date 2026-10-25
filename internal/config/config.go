@@ -1,4 +1,4 @@
-// Package config persists CLI state as JSON files under ~/.grok/bot-cli.
+// Package config persists CLI state as JSON files under ~/.grok/bot-tunnel.
 package config
 
 import (
@@ -50,7 +50,7 @@ func Default() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{Dir: filepath.Join(home, ".grok", "bot-cli")}, nil
+	return &Store{Dir: filepath.Join(home, ".grok", "bot-tunnel")}, nil
 }
 
 // UUID returns a random RFC 4122 version 4 UUID.

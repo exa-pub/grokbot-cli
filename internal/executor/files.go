@@ -21,7 +21,7 @@ import (
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
 )
 
 const (

@@ -21,7 +21,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/exa-pub/grokbot-cli/internal/client"
+	"github.com/exa-pub/grokbot-tunnel/internal/client"
 )
 
 const probeTimeout = 20 * time.Second

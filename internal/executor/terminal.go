@@ -12,7 +12,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
 )
 
 // Terminal files look like the desktop's: a metadata header, the raw output

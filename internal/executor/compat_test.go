@@ -15,8 +15,8 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
-	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
+	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
 )
 
 func clientMessages(t *testing.T, frames []*aiserverv1.GrokBotUserComputerResponseFrame) []*agentv1.ExecClientMessage {

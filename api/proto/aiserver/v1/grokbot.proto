@@ -1,6 +1,6 @@
 syntax = "proto3";
 package aiserver.v1;
-option go_package = "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1;aiserverv1";
+option go_package = "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1;aiserverv1";
 message GetMeResponse {
   string auth_id = 1;
   int32 user_id = 2;

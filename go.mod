@@ -1,4 +1,4 @@
-module github.com/exa-pub/grokbot-cli
+module github.com/exa-pub/grokbot-tunnel
 
 go 1.25.0
 
