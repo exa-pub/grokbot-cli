@@ -6,6 +6,9 @@ Requires Go 1.25+. Build, test, lint and code generation commands are in the
 To connect to a different server, set `SAND_BACKEND_URL` (API address) and
 `SAND_CURSOR_WEBSITE_URL` (sign-in page address).
 
+Shell tests run against bash and, when found, zsh: set `GROK_TEST_ZSH` to a zsh
+binary or put zsh on `PATH`.
+
 `testdata/compat/0.75.8/` holds reference data from the desktop client;
 `scripts/compat-reference.mjs` regenerates it.
 
