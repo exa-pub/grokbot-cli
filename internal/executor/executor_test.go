@@ -306,3 +306,44 @@ func TestQueuedShellCancelsWhileWaiting(t *testing.T) {
 	}
 	<-done
 }
+
+// Linux limits a single exec argument to 128 KiB; state and commands must not
+// be passed as arguments.
+func TestShellStateAndCommandsAboveArgumentLimit(t *testing.T) {
+	t.Setenv("SHELL", "/bin/bash")
+	e := setup(t)
+	body := strings.Repeat(": padding; ", 16<<10) // about 176 KiB once saved
+	define, _ := json.Marshal(map[string]any{"shellStreamArgs": map[string]any{"command": "big_fn() { " + body + "printf fn-ok; }"}})
+	collect(t, e, execFrame(string(define)))
+	stdout := func(frames []*aiserverv1.GrokBotUserComputerResponseFrame) string {
+		var out strings.Builder
+		for _, m := range clientMessages(t, frames) {
+			out.WriteString(m.GetShellStream().GetStdout().GetData())
+		}
+		return out.String()
+	}
+	if got := stdout(collect(t, e, execFrame(`{"shellStreamArgs":{"command":"big_fn"}}`))); got != "fn-ok" {
+		t.Fatalf("large function not replayed: %q", got)
+	}
+	large := strings.Repeat("x", 200<<10)
+	command, _ := json.Marshal(map[string]any{"shellStreamArgs": map[string]any{"command": "v=" + large + "; printf %d ${#v}"}})
+	if got := stdout(collect(t, e, execFrame(string(command)))); got != strconv.Itoa(len(large)) {
+		t.Fatalf("large command failed: %q", got)
+	}
+	background, _ := json.Marshal(map[string]any{"backgroundShellSpawnArgs": map[string]any{"command": "v=" + large + "; printf bg-%d ${#v}"}})
+	collect(t, e, execFrame(string(background)))
+	want := "bg-" + strconv.Itoa(len(large))
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries, _ := os.ReadDir(filepath.Join(e.Root, "terminals"))
+		for _, entry := range entries {
+			if b, _ := os.ReadFile(filepath.Join(e.Root, "terminals", entry.Name())); strings.Contains(string(b), want) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("large background command produced no output")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

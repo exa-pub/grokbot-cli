@@ -50,25 +50,28 @@ var saveStateTrap = strings.Join([]string{
 	`exit "$__grok_exit"`,
 }, "; ")
 
-// foregroundScript replays options ($1), functions ($2) and aliases ($3),
-// then runs the command ($4).
+// The saved state and the command reach the shell through files on
+// descriptors, not arguments: Linux limits a single argument to 128 KiB, and
+// functions from a login profile or a command with a heredoc can exceed that.
+
+// foregroundScript replays the saved options, functions and aliases from
+// descriptor 4, then runs the command from descriptor 5.
 var foregroundScript = strings.Join([]string{
-	`if [ -n "$1" ]; then builtin eval -- "$1"; fi`,
-	`if [ -n "$2" ]; then builtin eval -- "$2"; fi`,
-	`if [ -n "$3" ]; then builtin eval -- "$3"; fi`,
+	`builtin . /dev/fd/4`,
 	`trap '` + saveStateTrap + `' EXIT`,
-	`eval -- "$4"`,
+	`eval -- "$(</dev/fd/5)"`,
 }, "; ")
 
-// backgroundScript runs the command ($1) and appends the terminal footer.
+// backgroundScript runs the command from descriptor 4 and appends the
+// terminal footer.
 const backgroundScript = `trap '__grok_exit=$?; ` +
 	`builtin printf "\n---\nexit_code: %s\nended_at: %s\n---\n" "$__grok_exit" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"; ` +
-	`exit "$__grok_exit"' EXIT; eval -- "$1"`
+	`exit "$__grok_exit"' EXIT; eval -- "$(</dev/fd/4)"`
 
 // gateScript waits for a line on descriptor 3 before exec'ing the login shell
-// ($1) with the background script ($2) and command ($3), so the terminal
-// header is written before any output.
-const gateScript = `IFS= read -r __grok_start <&3; exec "$1" -lc "$2" grok-background "$3"`
+// ($1) with the background script ($2), so the terminal header is written
+// before any output.
+const gateScript = `IFS= read -r __grok_start <&3; exec "$1" -lc "$2" grok-background`
 
 // shellState is carried over between foreground commands.
 type shellState struct {
@@ -101,6 +104,28 @@ func shellBinary() string {
 		return path
 	}
 	return "/bin/bash"
+}
+
+// replayScript returns the shell code that restores st.
+func (st shellState) replayScript() string {
+	return strings.Join(st.options, "\n") + "\n" + st.functions + "\n" + st.aliases + "\n"
+}
+
+// tempFile returns an unlinked temporary file holding content; only open
+// descriptors keep it alive.
+func tempFile(prefix, content string) (*os.File, error) {
+	f, err := os.CreateTemp("", prefix)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Remove(f.Name()); err != nil {
+		log.Printf("remove %s: %v", f.Name(), err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		closeLogged(f)
+		return nil, err
+	}
+	return f, nil
 }
 
 // shellCommand runs a script in the user's shell. Running agent commands is
@@ -217,8 +242,14 @@ func (e *Executor) background(cmd, path string) (*agentv1.BackgroundShellSpawnSu
 	}
 	defer gate.Close()
 	defer release.Close()
-	c := shellCommand(st, cwd, "-c", gateScript, "grok-background", shellBinary(), backgroundScript, cmd)
-	c.ExtraFiles = []*os.File{gate}
+	command, err := tempFile("grok-command-", cmd)
+	if err != nil {
+		closeLogged(f)
+		return nil, err
+	}
+	defer closeLogged(command) // the child keeps its own descriptor
+	c := shellCommand(st, cwd, "-c", gateScript, "grok-background", shellBinary(), backgroundScript)
+	c.ExtraFiles = []*os.File{gate, command}
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	c.Stdout = f
 	c.Stderr = f
@@ -435,17 +466,24 @@ func (e *Executor) startShell(x *agentv1.ShellArgs, cwd string, st shellState, s
 		}
 		sh.out.file = sh.file
 	}
-	// Unlinked right away; only the descriptors keep it alive.
-	if sh.snapshot, err = os.CreateTemp("", "grok-shell-state-"); err != nil {
+	if sh.snapshot, err = tempFile("grok-shell-state-", ""); err != nil {
 		sh.closeFiles()
 		return nil, err
 	}
-	if err := os.Remove(sh.snapshot.Name()); err != nil {
-		log.Printf("remove shell snapshot: %v", err)
+	replay, err := tempFile("grok-shell-replay-", st.replayScript())
+	if err != nil {
+		sh.closeFiles()
+		return nil, err
 	}
-	options := strings.Join(st.options, "\n")
-	sh.cmd = shellCommand(st, cwd, "-lc", foregroundScript, "grokbot-shell", options, st.functions, st.aliases, x.Command)
-	sh.cmd.ExtraFiles = []*os.File{sh.snapshot}
+	defer closeLogged(replay) // the child keeps its own descriptor
+	command, err := tempFile("grok-command-", x.Command)
+	if err != nil {
+		sh.closeFiles()
+		return nil, err
+	}
+	defer closeLogged(command)
+	sh.cmd = shellCommand(st, cwd, "-lc", foregroundScript, "grokbot-shell")
+	sh.cmd.ExtraFiles = []*os.File{sh.snapshot, replay, command}
 	sh.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	sh.stdout = &streamWriter{out: sh.out, kind: "stdout"}
 	sh.stderr = &streamWriter{out: sh.out, kind: "stderr"}
