@@ -2,12 +2,15 @@
 package config
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 )
 
 // Auth holds the user's OAuth tokens and selected identity.
@@ -17,6 +20,9 @@ type Auth struct {
 	AuthID       string `json:"auth_id,omitempty"`
 	TeamID       string `json:"team_id,omitempty"`
 	Email        string `json:"email,omitempty"`
+	// ExpiresAtMS is when AccessToken expires, if the server said so. Zero
+	// means unknown; JWT access tokens carry their own expiry.
+	ExpiresAtMS int64 `json:"expires_at_ms,omitempty"`
 }
 
 // Machine identifies this computer to the server.
@@ -99,6 +105,40 @@ func (s *Store) Save(name string, v any) error {
 		return err
 	}
 	return os.Rename(f.Name(), s.path(name))
+}
+
+// lockPoll is how often Lock retries while another process holds the lock.
+const lockPoll = 50 * time.Millisecond
+
+// Lock takes an exclusive advisory lock shared by every process using the
+// store and returns a function that releases it. It gives up when ctx ends.
+func (s *Store) Lock(ctx context.Context) (func(), error) {
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(s.Dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		// Closing the file releases the lock, also if the process dies.
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) //nolint:gosec // fds fit in int
+		if err == nil {
+			return func() { f.Close() }, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			f.Close()
+			return nil, err
+		}
+		t := time.NewTimer(lockPoll)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			f.Close()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
+	}
 }
 
 // Machine loads the machine identity, creating it on first use.

@@ -43,6 +43,7 @@ proto:
 # Fails if the committed generated code is out of date.
 proto-check: proto
 	git diff --exit-code -- internal/gen
+	@test -z "$$(git status --porcelain -- internal/gen)" || { git status --porcelain -- internal/gen; exit 1; }
 
 clean:
 	rm -rf bin dist

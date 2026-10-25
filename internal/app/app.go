@@ -47,6 +47,7 @@ type env struct {
 	rest     *http.Client // plain REST calls: login polling and token refresh
 	computer *http.Client // Connect RPC authenticated by the computer credential
 	rpc      *http.Client // Connect RPC authenticated as the user
+	lookup   *http.Client // privacy-mode lookups, as the user but always private
 	privacy  *client.Privacy
 }
 
@@ -66,6 +67,13 @@ func newEnv(clientVersion string) (*env, error) {
 	http1 := defaultTransport.Clone()
 	http1.ForceAttemptHTTP2 = false
 	privacy := &client.Privacy{}
+	userRPC := client.Transport{
+		Base:    http1,
+		Machine: machine.MachineID,
+		Version: clientVersion,
+		Profile: client.UserRPC,
+		Privacy: privacy,
+	}
 	return &env{
 		store:   store,
 		machine: machine,
@@ -79,13 +87,8 @@ func newEnv(clientVersion string) (*env, error) {
 			Version: clientVersion,
 			Profile: client.ComputerRPC,
 		}},
-		rpc: &http.Client{Transport: client.Transport{
-			Base:    http1,
-			Machine: machine.MachineID,
-			Version: clientVersion,
-			Profile: client.UserRPC,
-			Privacy: privacy,
-		}},
+		rpc:     &http.Client{Transport: userRPC},
+		lookup:  client.PrivacyHTTP(userRPC),
 		privacy: privacy,
 	}, nil
 }
@@ -105,7 +108,7 @@ func (e *env) user(identity config.Auth) *user {
 		grokbot:   rpc.NewGrokBotServiceClient(e.rpc, e.base, userOptions(tokens)...),
 	}
 	// Ghost mode depends on the account, so look it up as this user.
-	e.privacy.Client = u.dashboard
+	e.privacy.Client = rpc.NewDashboardServiceClient(e.lookup, e.base, userOptions(tokens)...)
 	return u
 }
 

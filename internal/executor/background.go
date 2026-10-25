@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/exec"
@@ -13,11 +14,14 @@ import (
 // file. It replays the foreground state but neither waits for running
 // foreground commands nor changes the state. Descriptors are those of a
 // foreground shell, except that 4 is a gate opened once the terminal header is
-// written; the footer is appended when the process exits.
-func (e *Executor) background(cmd, path string) (_ *agentv1.BackgroundShellSpawnSuccess, err error) {
-	e.initShell()
+// written; the footer is appended when the process exits. A warning about the
+// working directory follows the header.
+func (e *Executor) background(ctx context.Context, cmd, path string) (_ *agentv1.BackgroundShellSpawnSuccess, err error) {
+	if err = e.initShell(ctx); err != nil {
+		return nil, err
+	}
 	st := e.shellState()
-	cwd, _, err := e.shellCwd(path, st)
+	cwd, warning, err := e.shellCwd(path, st)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +55,8 @@ func (e *Executor) background(cmd, path string) (_ *agentv1.BackgroundShellSpawn
 	if err = c.Start(); err != nil {
 		return nil, err
 	}
-	if err = writeTerminalHeader(f, cwd, cmd, c.Process.Pid); err == nil {
+	statusAt, err := writeTerminalHeader(f, cwd, cmd, c.Process.Pid, warning)
+	if err == nil {
 		_, err = release.WriteString("\n")
 	}
 	if err != nil {
@@ -59,14 +64,14 @@ func (e *Executor) background(cmd, path string) (_ *agentv1.BackgroundShellSpawn
 		wait(c)
 		return nil, err
 	}
-	go closeTerminal(n, f, c)
+	go closeTerminal(n, f, c, statusAt)
 	return &agentv1.BackgroundShellSpawnSuccess{ShellId: n, Command: cmd, WorkingDirectory: cwd, Pid: pid(c)}, nil
 }
 
 // closeTerminal appends the footer to terminal file n once c has exited.
-func closeTerminal(n uint32, f *os.File, c *exec.Cmd) {
+func closeTerminal(n uint32, f *os.File, c *exec.Cmd, statusAt int64) {
 	wait(c)
-	if err := appendTerminalExit(f, c.ProcessState); err != nil {
+	if err := appendTerminalExit(f, c.ProcessState, statusAt); err != nil {
 		log.Printf("terminal %d: %v", n, err)
 	}
 	closeLogged(f)

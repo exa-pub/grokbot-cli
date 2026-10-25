@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -355,5 +356,133 @@ func TestShellStateAndCommandsAboveArgumentLimit(t *testing.T) {
 			t.Fatal("large background command produced no output")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Opening a FIFO must not block until a writer appears.
+func TestFIFORejectedPromptly(t *testing.T) {
+	e := discoverySetup(t)
+	fifo := filepath.Join(e.Root, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"history.jsonl", "config.toml"} {
+		if err := syscall.Mkfifo(filepath.Join(e.DiscoveryHome, name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := time.Now()
+	frames := collect(t, e, execFrame(`{"readArgs":{"path":"fifo"}}`))
+	if msg := clientMessages(t, frames)[0].GetReadResult().GetError().GetError(); !strings.Contains(msg, "expected regular file") {
+		t.Fatal(frames)
+	}
+	frames = collect(t, e, &aiserverv1.GrokBotUserComputerRequestFrame{RequestId: "d", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Download{Download: &aiserverv1.GrokBotUserComputerDownload{Path: "fifo"}}})
+	if !strings.Contains(frames[0].GetFileError().GetError(), "expected regular file") {
+		t.Fatal(frames)
+	}
+	for _, read := range []func(context.Context, string) ([]byte, error){readConfig, readTail} {
+		for _, name := range []string{"history.jsonl", "config.toml"} {
+			if _, err := read(context.Background(), filepath.Join(e.DiscoveryHome, name)); err == nil || !strings.Contains(err.Error(), "expected regular file") {
+				t.Fatal(err)
+			}
+		}
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("FIFO blocked")
+	}
+}
+
+// Invalid UTF-8 in a file name cannot be encoded as JSON; it is replaced.
+func TestListInvalidUTF8Name(t *testing.T) {
+	e := setup(t)
+	if err := os.MkdirAll(filepath.Join(e.Root, "d\xff"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"caf\xe9.txt", "d\xff/x.\xfe"} {
+		if err := os.WriteFile(filepath.Join(e.Root, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	frames := collect(t, e, execFrame(`{"lsArgs":{"path":"."}}`))
+	tree := clientMessages(t, frames)[0].GetLsResult().GetSuccess().GetDirectoryTreeRoot()
+	if tree == nil || len(tree.ChildrenFiles) != 1 || tree.ChildrenFiles[0].Name != "caf�.txt" ||
+		len(tree.ChildrenDirs) != 1 || !strings.HasSuffix(tree.ChildrenDirs[0].AbsPath, "d�") {
+		t.Fatal(frames)
+	}
+	tree = &treeNode{FullSubtreeExtensionCounts: map[string]int32{".\xfe": 1, ".\xff": 2}}
+	validUTF8(tree)
+	if tree.FullSubtreeExtensionCounts[".�"] != 3 {
+		t.Fatal(tree)
+	}
+}
+
+// Once the budget is spent, directories are no longer listed, only counted:
+// a tree of many directories stays far below the message limit.
+func TestListBudgetLimitsDirectories(t *testing.T) {
+	e := setup(t)
+	const dirs = 3000
+	for i := range dirs {
+		dir := filepath.Join(e.Root, "directory-with-a-long-name-"+strconv.Itoa(i))
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "f.go"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(tree *treeNode) {
+		t.Helper()
+		listed, nodes := 0, 0
+		var visit func(*treeNode)
+		visit = func(n *treeNode) {
+			nodes++
+			listed += len(n.ChildrenFiles)
+			for _, child := range n.ChildrenDirs {
+				visit(child)
+			}
+		}
+		visit(tree)
+		if tree.ChildrenWereProcessed || nodes > listBudget/20 || listed+int(tree.NumFiles) != dirs || tree.FullSubtreeExtensionCounts[".go"] != tree.NumFiles {
+			t.Fatalf("nodes %d, listed %d, counted %d", nodes, listed, tree.NumFiles)
+		}
+	}
+	frames := collect(t, e, execFrame(`{"lsArgs":{"path":"."}}`))
+	check(clientMessages(t, frames)[0].GetLsResult().GetSuccess().DirectoryTreeRoot)
+	// The tree that ripgrep's output would build.
+	l := &lister{root: e.Root, files: e.Files, budget: listBudget}
+	b := &treeBuilder{lister: l, root: newNode(e.Root)}
+	b.nodes = map[string]*treeNode{e.Root: b.root}
+	for i := range dirs {
+		b.add("directory-with-a-long-name-" + strconv.Itoa(i) + "/f.go")
+	}
+	check(b.root)
+}
+
+func TestUploadThroughDanglingSymlink(t *testing.T) {
+	e := setup(t)
+	if err := os.Symlink("sub/target", filepath.Join(e.Root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(e.Root, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.upload("link", []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(e.Root, "sub", "target")); err != nil || string(b) != "new" {
+		t.Fatal(string(b), err)
+	}
+	if st, _ := os.Lstat(filepath.Join(e.Root, "link")); st.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("symlink replaced")
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.Symlink(outside, filepath.Join(e.Root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.upload("escape", []byte("x")); err == nil {
+		t.Fatal("upload escaped root")
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Fatal("file written outside root")
 	}
 }

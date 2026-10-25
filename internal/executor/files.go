@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -29,6 +30,8 @@ const (
 	maxTextRead     = MaxJSON - envelopeReserve
 	// Binary data is base64-encoded in JSON.
 	maxBinaryRead = maxTextRead * 3 / 4
+	// maxSymlinks bounds a chain of symlinks, like Linux's MAXSYMLINKS.
+	maxSymlinks = 40
 	// listBudget is how many UTF-16 code units of names a listing may hold.
 	listBudget = 2500
 	// mostlyCRLF is the share of CRLF line endings, in percent, above which
@@ -55,14 +58,7 @@ func (e *Executor) upload(path string, data []byte) error {
 	if len(data) > MaxFile {
 		return errFileTooLarge
 	}
-	// Write through a symlink to its target, as long as it stays inside Root.
-	resolved, err := filepath.EvalSymlinks(filepath.Join(e.Root, rel))
-	switch {
-	case err == nil:
-		if rel, err = e.relative(resolved); err != nil {
-			return err
-		}
-	case !errors.Is(err, os.ErrNotExist):
+	if rel, err = e.uploadTarget(rel); err != nil {
 		return err
 	}
 	dir := filepath.Dir(rel)
@@ -99,6 +95,39 @@ func (e *Executor) upload(path string, data []byte) error {
 	return e.Files.Rename(temp, rel)
 }
 
+// uploadTarget follows symlinks in rel, including dangling ones, so that an
+// upload writes through a symlink to its target instead of replacing it. The
+// target must stay inside Root.
+func (e *Executor) uploadTarget(rel string) (string, error) {
+	for range maxSymlinks {
+		path := filepath.Join(e.Root, rel)
+		resolved, err := filepath.EvalSymlinks(path)
+		if err == nil {
+			return e.relative(resolved)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		// Something is missing: either the file, which is created, or the
+		// target of a dangling symlink, which is followed.
+		target, err := os.Readlink(path)
+		if err != nil {
+			return rel, nil //nolint:nilerr // not a symlink: create the file
+		}
+		if !filepath.IsAbs(target) {
+			dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+			if err != nil {
+				return "", err
+			}
+			target = filepath.Join(dir, target)
+		}
+		if rel, err = e.relative(target); err != nil {
+			return "", err
+		}
+	}
+	return "", syscall.ELOOP
+}
+
 // uploadMode returns the permissions of an existing target, or the default.
 func (e *Executor) uploadMode(rel string) (os.FileMode, bool, error) {
 	st, err := e.Files.Stat(rel)
@@ -120,13 +149,15 @@ func (e *Executor) removeTemp(rel string) {
 	}
 }
 
-// open opens a regular file of at most MaxFile bytes below Root.
+// open opens a regular file of at most MaxFile bytes below Root. O_NONBLOCK
+// keeps a FIFO from blocking until a writer appears; it does not affect
+// regular files.
 func (e *Executor) open(path string) (*os.File, error) {
 	rel, err := e.relative(path)
 	if err != nil {
 		return nil, err
 	}
-	f, err := e.Files.Open(rel)
+	f, err := e.Files.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -409,6 +440,7 @@ func (e *Executor) ls(ctx context.Context, x *agentv1.LsArgs, send reply) error 
 	defer cancel()
 	l := lister{root: e.Root, files: e.Files, ignore: x.Ignore, budget: listBudget - nameCost(path)}
 	tree, err := l.list(ctx, rel)
+	validUTF8(tree)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return send(lsMessage(&agentv1.LsResult{Result: &agentv1.LsResult_Timeout{
 			Timeout: &agentv1.LsTimeout{DirectoryTreeRoot: tree},

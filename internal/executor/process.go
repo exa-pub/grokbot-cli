@@ -75,6 +75,12 @@ func closeLogged(f *os.File) {
 	}
 }
 
+func removeLogged(path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("remove %s: %v", path, err)
+	}
+}
+
 func pid(c *exec.Cmd) *uint32 {
 	return proto.Uint32(uint32(c.Process.Pid)) //nolint:gosec // PIDs are positive
 }

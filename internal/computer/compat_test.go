@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/exa-pub/grokbot-cli/internal/config"
+	"github.com/exa-pub/grokbot-cli/internal/executor"
 	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
 	rpc "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1/aiserverv1connect"
 	"github.com/exa-pub/grokbot-cli/internal/permission"
@@ -239,5 +241,386 @@ func TestRemovedComputerDetailAndWatchClock(t *testing.T) {
 	now = now.Add(2 * time.Second)
 	if e := s.onTick(context.Background()); e != nil || s.watchAlive || s.nextDial != now.Add(2*time.Second) {
 		t.Fatal("connect watchdog did not schedule reconnect", e)
+	}
+}
+
+// stubCloud is a configurable server for session-level tests.
+type stubCloud struct {
+	rpc.UnimplementedGrokBotServiceHandler
+	mu                     sync.Mutex
+	issues, submits, polls int
+	ttl                    time.Duration
+	failIssue, failSubmit  bool
+	failPoll               bool
+	submitted              []*responseFrame
+	block                  chan struct{} // holds submits until closed
+	unauthenticated        bool          // submits are rejected
+}
+
+func (c *stubCloud) IssueGrokBotUserComputerCredential(ctx context.Context, r *connect.Request[aiserverv1.IssueGrokBotUserComputerCredentialRequest]) (*connect.Response[aiserverv1.IssueGrokBotUserComputerCredentialResponse], error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.issues++
+	if c.failIssue {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("down"))
+	}
+	return connect.NewResponse(&aiserverv1.IssueGrokBotUserComputerCredentialResponse{Credential: fmt.Sprint(c.issues), ExpiresAtMs: time.Now().Add(c.ttl).UnixMilli()}), nil
+}
+func (c *stubCloud) SubmitGrokBotUserComputerResponses(ctx context.Context, r *connect.Request[aiserverv1.SubmitGrokBotUserComputerResponsesRequest]) (*connect.Response[aiserverv1.SubmitGrokBotUserComputerResponsesResponse], error) {
+	if c.block != nil {
+		<-c.block
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.submits++
+	if c.unauthenticated {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("expired"))
+	}
+	if c.failSubmit {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("down"))
+	}
+	c.submitted = append(c.submitted, r.Msg.Frames...)
+	return connect.NewResponse(&aiserverv1.SubmitGrokBotUserComputerResponsesResponse{AcceptedCount: uint32(len(r.Msg.Frames))}), nil
+}
+func (c *stubCloud) PollGrokBotUserComputerRequests(ctx context.Context, r *connect.Request[aiserverv1.PollGrokBotUserComputerRequestsRequest]) (*connect.Response[aiserverv1.PollGrokBotUserComputerRequestsResponse], error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.polls++
+	if c.failPoll {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("down"))
+	}
+	return connect.NewResponse(&aiserverv1.PollGrokBotUserComputerRequestsResponse{}), nil
+}
+func (c *stubCloud) WatchGrokBotUserComputerRequests(ctx context.Context, r *connect.Request[aiserverv1.WatchGrokBotUserComputerRequestsRequest], stream *connect.ServerStream[aiserverv1.WatchGrokBotUserComputerRequestsEvent]) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (c *stubCloud) counts() (issues, submits, polls int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.issues, c.submits, c.polls
+}
+
+// stubSession returns a session talking to c whose clock is controlled by *now.
+func stubSession(t *testing.T, c *stubCloud, now *time.Time) *session {
+	t.Helper()
+	path, h := rpc.NewGrokBotServiceHandler(c)
+	mux := http.NewServeMux()
+	mux.Handle(path, h)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	s := testSession(t)
+	*now = time.Now()
+	s.pv.Now = func() time.Time { return *now }
+	cl := rpc.NewGrokBotServiceClient(srv.Client(), srv.URL)
+	s.pv.User, s.pv.Channel = cl, cl
+	ex, err := executor.New(t.TempDir(), s.pv.Policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ex.Close() })
+	s.pv.Executor = ex
+	return s
+}
+
+// settle waits for the submit and poll in flight, applying their results like
+// Run does, and returns the first error.
+func settle(t *testing.T, s *session) error {
+	t.Helper()
+	var first error
+	for s.submitting || s.polling {
+		select {
+		case r := <-s.submitted:
+			if err := s.onSubmitted(r); err != nil && first == nil {
+				first = err
+			}
+		case r := <-s.polled:
+			s.onPolled(r)
+		case <-time.After(5 * time.Second):
+			t.Fatal("RPC did not finish")
+		}
+	}
+	return first
+}
+
+// tick runs onTick and settles the RPCs it started.
+func tick(t *testing.T, s *session) error {
+	t.Helper()
+	if err := s.onTick(context.Background()); err != nil {
+		return err
+	}
+	return settle(t, s)
+}
+
+func closeFrame(id string) *responseFrame {
+	return &responseFrame{RequestId: id, Frame: &aiserverv1.GrokBotUserComputerResponseFrame_Control{Control: &aiserverv1.GrokBotUserComputerControlMessage{MessageJson: `{"streamClose":{"id":3}}`}}}
+}
+
+func TestKeepAliveIsBounded(t *testing.T) {
+	var now time.Time
+	c := &stubCloud{failSubmit: true}
+	s := stubSession(t, c, &now)
+	s.credential = config.Computer{Credential: "c", ExpiresAtMS: now.Add(time.Hour).UnixMilli()}
+	for i := range 72 {
+		s.tasks[fmt.Sprint(i)] = &task{cancel: func() {}}
+	}
+	s.tasks["queued"] = &task{}
+	s.queue(closeFrame("closed"))
+	for range 10 {
+		s.keepAlive()
+	}
+	// A full round of failed submits must not end the session.
+	for range submitAttempts {
+		s.nextSubmit = time.Time{}
+		s.startSubmit()
+		if err := settle(t, s); errors.Is(err, errBacklogFull) {
+			t.Fatal(err)
+		}
+	}
+	if _, submits, _ := c.counts(); submits != submitAttempts {
+		t.Fatal(submits)
+	}
+	alive := map[string]int{}
+	for _, f := range s.pending {
+		if f.GetMessagesAccepted() != nil {
+			alive[f.RequestId]++
+		}
+	}
+	if len(alive) != 72 || alive["queued"] != 0 || alive["closed"] != 0 {
+		t.Fatal(len(alive), alive["queued"], alive["closed"])
+	}
+	for id, n := range alive {
+		if n != 1 {
+			t.Fatalf("%s has %d keepalives", id, n)
+		}
+	}
+	// Keepalives alone never exhaust the backlog.
+	for i := range maxPending {
+		s.queue(&responseFrame{RequestId: fmt.Sprint(i), Frame: &aiserverv1.GrokBotUserComputerResponseFrame_MessagesAccepted{MessagesAccepted: &aiserverv1.GrokBotUserComputerMessagesAccepted{}}})
+	}
+	if s.stuck() != 1 {
+		t.Fatal(s.stuck())
+	}
+}
+
+func TestCancelKeepsCloseOfFinishedRequest(t *testing.T) {
+	s := testSession(t)
+	s.queue(&responseFrame{RequestId: "fin", Frame: &aiserverv1.GrokBotUserComputerResponseFrame_Client{Client: &aiserverv1.GrokBotUserComputerClientMessage{MessageJson: "result"}}})
+	s.queue(closeFrame("fin"))
+	s.accept(&requestFrame{RequestId: "fin", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_Cancel{Cancel: &aiserverv1.GrokBotUserComputerCancel{}}})
+	if len(s.pending) != 1 || s.pending[0].GetControl() == nil {
+		t.Fatal("cancel purged the stream close", s.pending)
+	}
+}
+
+func TestCanceledRunningRequestReportsTerminalFrame(t *testing.T) {
+	s := testSession(t)
+	download := &aiserverv1.GrokBotUserComputerRequestFrame_Download{Download: &aiserverv1.GrokBotUserComputerDownload{Path: "x"}}
+	s.canceled.add("run")
+	if err := executor.Reject(&requestFrame{RequestId: "run", Frame: download}, context.Canceled, func(f *responseFrame) error { s.take(f); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.pending) != 1 || s.pending[0].GetFileError() == nil {
+		t.Fatal("terminal error of canceled request dropped", s.pending)
+	}
+	s.pending = nil
+	s.canceled.add("dl")
+	s.take(&responseFrame{RequestId: "dl", Frame: &aiserverv1.GrokBotUserComputerResponseFrame_File{File: &aiserverv1.GrokBotUserComputerFile{Data: []byte("a")}}})
+	s.take(&responseFrame{RequestId: "dl", Frame: &aiserverv1.GrokBotUserComputerResponseFrame_File{File: &aiserverv1.GrokBotUserComputerFile{Data: []byte("b"), Seq: 1, Last: true}}})
+	if len(s.pending) != 1 || s.pending[0].GetFileError() == nil {
+		t.Fatal("truncated transfer reported as complete", s.pending)
+	}
+	// A last chunk already pending when the cancel arrives is replaced too.
+	s.pending = nil
+	s.tasks["late"] = &task{cancel: func() {}}
+	s.queue(&responseFrame{RequestId: "late", Frame: &aiserverv1.GrokBotUserComputerResponseFrame_File{File: &aiserverv1.GrokBotUserComputerFile{Data: []byte("a")}}})
+	s.queue(&responseFrame{RequestId: "late", Frame: &aiserverv1.GrokBotUserComputerResponseFrame_File{File: &aiserverv1.GrokBotUserComputerFile{Data: []byte("b"), Seq: 1, Last: true}}})
+	s.cancel("late")
+	if len(s.pending) != 1 || s.pending[0].GetFileError() == nil {
+		t.Fatal("pending terminal frame of canceled request lost", s.pending)
+	}
+}
+
+func TestShortCredentialRenewedHalfway(t *testing.T) {
+	var now time.Time
+	c := &stubCloud{ttl: 4 * time.Minute}
+	s := stubSession(t, c, &now)
+	for range 5 {
+		if err := tick(t, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if issues, _, _ := c.counts(); issues != 1 {
+		t.Fatalf("credential reissued %d times", issues)
+	}
+	now = now.Add(time.Minute)
+	tick(t, s)
+	if issues, _, _ := c.counts(); issues != 1 {
+		t.Fatal("renewed too early")
+	}
+	now = now.Add(61 * time.Second)
+	tick(t, s)
+	if issues, _, _ := c.counts(); issues != 2 {
+		t.Fatal("not renewed halfway", issues)
+	}
+}
+
+func TestFailedRenewalKeepsSessionWorking(t *testing.T) {
+	var now time.Time
+	c := &stubCloud{failIssue: true}
+	s := stubSession(t, c, &now)
+	s.credential = config.Computer{Credential: "c", ExpiresAtMS: now.Add(4 * time.Minute).UnixMilli()}
+	s.watchAlive, s.lastStanding, s.lastEvent = true, "always", now
+	s.queue(&responseFrame{RequestId: "r", Frame: &aiserverv1.GrokBotUserComputerResponseFrame_MessagesError{MessagesError: &aiserverv1.GrokBotUserComputerMessagesError{}}})
+	for range 3 {
+		if err := tick(t, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	issues, submits, polls := c.counts()
+	if issues != 1 || submits != 1 || len(s.pending) != 0 {
+		t.Fatalf("issues=%d submits=%d pending=%d", issues, submits, len(s.pending))
+	}
+	if !s.nextDial.IsZero() || !s.watchAlive {
+		t.Fatal("renewal failure delayed the watch", s.nextDial)
+	}
+	s.needPoll = true
+	tick(t, s)
+	if _, _, p := c.counts(); p != polls+1 {
+		t.Fatal("poll blocked by failed renewal")
+	}
+	now = now.Add(time.Second)
+	tick(t, s)
+	if issues, _, _ := c.counts(); issues != 2 {
+		t.Fatal("renewal not retried after backoff", issues)
+	}
+	// Once the old credential expires, nothing is sent with it.
+	now = now.Add(5 * time.Minute)
+	s.queue(&responseFrame{RequestId: "r2"})
+	tick(t, s)
+	if _, submits, _ := c.counts(); submits != 1 || len(s.pending) != 1 {
+		t.Fatal("expired credential used")
+	}
+}
+
+func TestQueuedEventPreventsStaleDrop(t *testing.T) {
+	s := testSession(t)
+	now := s.now()
+	s.credential = config.Computer{Credential: "c", ExpiresAtMS: now.Add(time.Hour).UnixMilli()}
+	s.watchAlive, s.watchConnected, s.lastStanding = true, true, "always"
+	s.lastEvent = now.Add(-16 * time.Second)
+	s.events <- watched{generation: s.generation, event: &aiserverv1.WatchGrokBotUserComputerRequestsEvent{Event: &aiserverv1.WatchGrokBotUserComputerRequestsEvent_Heartbeat{Heartbeat: &aiserverv1.WatchGrokBotUserComputerHeartbeat{}}}}
+	if err := s.onTick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !s.watchAlive {
+		t.Fatal("live stream dropped while its event was queued")
+	}
+}
+
+func TestShutdownFlushesDespiteSlowWorker(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits for the worker grace period")
+	}
+	var now time.Time
+	c := &stubCloud{}
+	s := stubSession(t, c, &now)
+	s.credential = config.Computer{Credential: "c", ExpiresAtMS: now.Add(time.Hour).UnixMilli()}
+	s.active = 1 // never finishes
+	s.queue(closeFrame("done"))
+	start := time.Now()
+	s.shutdown()
+	if _, submits, _ := c.counts(); submits != 1 || len(s.pending) != 0 {
+		t.Fatal("final submit skipped", submits)
+	}
+	if d := time.Since(start); d > shutdownGrace {
+		t.Fatal("shutdown overran its grace", d)
+	}
+}
+
+func TestPollFailureRetriesWithBackoff(t *testing.T) {
+	var now time.Time
+	c := &stubCloud{failPoll: true}
+	s := stubSession(t, c, &now)
+	s.credential = config.Computer{Credential: "c", ExpiresAtMS: now.Add(time.Hour).UnixMilli()}
+	s.watchAlive, s.lastStanding, s.lastEvent = true, "always", now
+	s.needPoll = true
+	tick(t, s)
+	tick(t, s)
+	if _, _, polls := c.counts(); polls != 1 || !s.needPoll {
+		t.Fatal("failed poll not rescheduled with backoff", polls)
+	}
+	now = now.Add(time.Second)
+	tick(t, s)
+	if _, _, polls := c.counts(); polls != 2 {
+		t.Fatal("failed poll not retried", polls)
+	}
+}
+
+func TestServerAuthoritativeStandingChangeKeepsWatch(t *testing.T) {
+	var now time.Time
+	s := stubSession(t, &stubCloud{}, &now)
+	s.credential = config.Computer{Credential: "c", ExpiresAtMS: now.Add(time.Hour).UnixMilli(), ServerAuthoritative: true}
+	s.startWatch()
+	gen := s.generation
+	s.pv.Policy.Mode = permission.ModeAsk
+	if err := s.onTick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if s.generation != gen {
+		t.Fatal("reconnected for a standing the server ignores")
+	}
+	s.credential.ServerAuthoritative = false
+	s.onTick(context.Background())
+	if s.generation == gen {
+		t.Fatal("standing change not announced")
+	}
+}
+
+func TestSubmitRunsOffTheRunGoroutine(t *testing.T) {
+	var now time.Time
+	c := &stubCloud{block: make(chan struct{})}
+	s := stubSession(t, c, &now)
+	s.credential = config.Computer{Credential: "c", ExpiresAtMS: now.Add(time.Hour).UnixMilli()}
+	s.queue(closeFrame("a"))
+	start := time.Now()
+	s.startSubmit()
+	if !s.submitting || time.Since(start) > time.Second {
+		t.Fatal("submit blocked the caller")
+	}
+	for i := range submitBatch {
+		s.queue(closeFrame(fmt.Sprint(i)))
+	}
+	s.startSubmit()
+	if s.acceptReplies() != nil {
+		t.Fatal("replies not throttled while a full batch waits")
+	}
+	close(c.block)
+	if err := settle(t, s); err != nil {
+		t.Fatal(err)
+	}
+	if _, submits, _ := c.counts(); submits != 2 || len(s.pending) != 0 || len(c.submitted) != submitBatch+1 {
+		t.Fatal("pending not drained one submit at a time", submits, len(s.pending))
+	}
+	if s.acceptReplies() == nil {
+		t.Fatal("replies still throttled")
+	}
+}
+
+func TestStaleSubmitResultKeepsNewCredential(t *testing.T) {
+	var now time.Time
+	c := &stubCloud{block: make(chan struct{}), unauthenticated: true}
+	s := stubSession(t, c, &now)
+	s.credential = config.Computer{Credential: "old", ExpiresAtMS: now.Add(time.Hour).UnixMilli()}
+	s.queue(closeFrame("a"))
+	s.startSubmit()
+	s.credential = config.Computer{Credential: "new", ExpiresAtMS: now.Add(time.Hour).UnixMilli()}
+	close(c.block)
+	r := <-s.submitted
+	if err := s.onSubmitted(r); err != nil {
+		t.Fatal(err)
+	}
+	if s.credential.Credential != "new" || len(s.pending) != 1 {
+		t.Fatal("rejection of the old credential dropped the new one")
 	}
 }

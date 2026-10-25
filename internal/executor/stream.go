@@ -29,11 +29,20 @@ type shellOutput struct {
 	send     reply
 	file     *os.File
 	detached bool  // the command was backgrounded; stop streaming
+	finished bool  // the command has exited; discard further output
 	err      error // first send failure
 }
 
 func (o *shellOutput) emit(event func(string) *agentv1.ShellStream, data string) error {
 	return o.send(shellMessage(event(data)))
+}
+
+// finish discards all further output, so that nothing reaches the agent after
+// the command's exit or the terminal file after its footer.
+func (o *shellOutput) finish() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.finished = true
 }
 
 func (o *shellOutput) sendErr() error {
@@ -56,6 +65,9 @@ func (w *streamWriter) Write(b []byte) (int, error) {
 	o := w.out
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.finished {
+		return len(b), nil
+	}
 	if o.file != nil {
 		if _, err := o.file.Write(b); err != nil {
 			log.Printf("terminal output: %v", err)
@@ -83,7 +95,7 @@ func (w *streamWriter) Write(b []byte) (int, error) {
 func (w *streamWriter) flush() {
 	w.out.mu.Lock()
 	defer w.out.mu.Unlock()
-	if len(w.partial) > 0 && !w.out.detached && w.out.err == nil {
+	if len(w.partial) > 0 && !w.out.detached && !w.out.finished && w.out.err == nil {
 		w.out.err = w.out.emit(w.event, strings.ToValidUTF8(string(w.partial), "�"))
 	}
 	w.partial = nil

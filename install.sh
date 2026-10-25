@@ -6,6 +6,7 @@
 # GROKBOT_VERSION    release tag to install, e.g. v0.1.0 (default: latest)
 # GROKBOT_INSTALL_DIR  target directory (default: /usr/local/bin if writable
 #                    or sudo is available, otherwise ~/.local/bin)
+# GROKBOT_SKIP_CHECKSUM=1  install without verifying checksums.txt
 set -eu
 
 REPO="exa-pub/grokbot-cli"
@@ -37,6 +38,11 @@ case "$(uname -m)" in
   *) fail "unsupported architecture $(uname -m)" ;;
 esac
 
+local_bin() {
+  [ -n "${HOME:-}" ] || fail "HOME is not set; set GROKBOT_INSTALL_DIR instead"
+  echo "$HOME/.local/bin"
+}
+
 # Prompts go to stderr and read from the terminal, so they work with
 # `curl | sh` and are not captured by $(...).
 install_dir() {
@@ -52,15 +58,13 @@ install_dir() {
     printf "    [2] Install to ~/.local/bin\n" >&2
     printf "    Choice [1]: " >&2
     # Without a usable terminal sudo could not ask for a password either.
-    if ! { read -r choice </dev/tty; } 2>/dev/null; then
-      echo "$HOME/.local/bin"
-    elif [ "$choice" = 2 ]; then
-      echo "$HOME/.local/bin"
+    if ! { read -r choice </dev/tty; } 2>/dev/null || [ "$choice" = 2 ]; then
+      local_bin
     else
       echo /usr/local/bin
     fi
   else
-    echo "$HOME/.local/bin"
+    local_bin
   fi
 }
 
@@ -87,25 +91,27 @@ trap 'rm -rf "$TMP"' EXIT
 info "Downloading ${BASE}/${ARCHIVE}"
 download "${BASE}/${ARCHIVE}" "${TMP}/${ARCHIVE}" || fail "download failed; check GROKBOT_VERSION"
 
-if download "${BASE}/checksums.txt" "${TMP}/checksums.txt" 2>/dev/null; then
+if [ "${GROKBOT_SKIP_CHECKSUM:-}" = 1 ]; then
+  warn "GROKBOT_SKIP_CHECKSUM=1; skipping checksum verification"
+else
+  command -v sha256sum >/dev/null 2>&1 ||
+    fail "sha256sum is required to verify the download (set GROKBOT_SKIP_CHECKSUM=1 to skip)"
+  download "${BASE}/checksums.txt" "${TMP}/checksums.txt" ||
+    fail "could not download checksums.txt (set GROKBOT_SKIP_CHECKSUM=1 to skip)"
   expected="$(awk -v f="$ARCHIVE" '$2 == f { print $1 }' "${TMP}/checksums.txt")"
   [ -n "$expected" ] || fail "${ARCHIVE} is missing from checksums.txt"
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "${TMP}/${ARCHIVE}" | awk '{ print $1 }')"
-    [ "$actual" = "$expected" ] || fail "checksum mismatch: expected ${expected}, got ${actual}"
-    info "Checksum verified"
-  else
-    warn "sha256sum not found; skipping checksum verification"
-  fi
-else
-  warn "checksums.txt not found; skipping checksum verification"
+  actual="$(sha256sum "${TMP}/${ARCHIVE}" | awk '{ print $1 }')"
+  [ "$actual" = "$expected" ] || fail "checksum mismatch: expected ${expected}, got ${actual}"
+  info "Checksum verified"
 fi
 
 tar -xzf "${TMP}/${ARCHIVE}" -C "$TMP"
 $SUDO mkdir -p "$INSTALL_DIR"
 $SUDO install -m 755 "${TMP}/${BINARY}-linux-${ARCH}" "${INSTALL_DIR}/${BINARY}"
 
-info "Installed $("${INSTALL_DIR}/${BINARY}" --version) to ${INSTALL_DIR}/${BINARY}"
+version="$("${INSTALL_DIR}/${BINARY}" --version)" ||
+  fail "${INSTALL_DIR}/${BINARY} was installed but does not run on this system"
+info "Installed ${version} to ${INSTALL_DIR}/${BINARY}"
 
 case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;

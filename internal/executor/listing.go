@@ -49,16 +49,24 @@ func extension(name string) string {
 	return filepath.Ext(name)
 }
 
-// addFile lists name in node if the budget allows. Once a name does not fit,
-// no further names are listed.
-func (l *lister) addFile(node *treeNode, name string) bool {
+// charge spends the cost of name if the budget allows. Once a name does not
+// fit, nothing further is listed.
+func (l *lister) charge(name string) bool {
 	if cost := nameCost(name); l.budget >= cost {
-		node.ChildrenFiles = append(node.ChildrenFiles, &agentv1.LsDirectoryTreeNode_File{Name: name})
 		l.budget -= cost
 		return true
 	}
 	l.budget = -1
 	return false
+}
+
+// addFile lists name in node if the budget allows.
+func (l *lister) addFile(node *treeNode, name string) bool {
+	if !l.charge(name) {
+		return false
+	}
+	node.ChildrenFiles = append(node.ChildrenFiles, &agentv1.LsDirectoryTreeNode_File{Name: name})
+	return true
 }
 
 // countOmitted records a file that was not listed.
@@ -87,7 +95,8 @@ func (l *lister) ignored(name string) bool {
 }
 
 // walk lists dir recursively without following symlinks. Directories without
-// listed files are left out.
+// listed files are left out, and so are directories reached after the budget
+// ran out: their files are only counted in the nearest listed ancestor.
 func (l *lister) walk(ctx context.Context, dir string) (*treeNode, error) {
 	node := newNode(filepath.Join(l.root, dir))
 	if err := ctx.Err(); err != nil {
@@ -119,11 +128,18 @@ func (l *lister) walk(ctx context.Context, dir string) (*treeNode, error) {
 	return node, nil
 }
 
-// walkChild lists a subdirectory and merges its counts into parent.
+// walkChild lists a subdirectory and merges its counts into parent. Like
+// file names, directory names are charged to the budget.
 func (l *lister) walkChild(ctx context.Context, parent *treeNode, dir string) error {
+	before := l.budget
+	listed := l.charge(filepath.Base(dir))
 	child, err := l.walk(ctx, dir)
-	if len(child.ChildrenFiles) > 0 || len(child.ChildrenDirs) > 0 || !child.ChildrenWereProcessed {
+	switch {
+	case !listed:
+	case len(child.ChildrenFiles) > 0 || len(child.ChildrenDirs) > 0 || !child.ChildrenWereProcessed:
 		parent.ChildrenDirs = append(parent.ChildrenDirs, child)
+	default:
+		l.budget = before // an empty directory is left out for free
 	}
 	if !child.ChildrenWereProcessed {
 		parent.ChildrenWereProcessed = false
@@ -212,17 +228,23 @@ type treeBuilder struct {
 	overflow bool                 // the budget ran out
 }
 
-// dir returns the node for path, creating it and its ancestors as needed.
-func (b *treeBuilder) dir(path string) *treeNode {
+// dir returns the node for path, creating it and its ancestors while the
+// budget allows directory names; ok is false if it returns the nearest
+// existing ancestor instead. Once the budget runs out no nodes are created, so
+// a large tree cannot exceed the message size through directories alone.
+func (b *treeBuilder) dir(path string) (_ *treeNode, ok bool) {
 	if n := b.nodes[path]; n != nil {
-		return n
+		return n, true
 	}
-	parent := b.dir(filepath.Dir(path))
+	parent, ok := b.dir(filepath.Dir(path))
+	if !ok || b.overflow || !b.lister.charge(filepath.Base(path)) {
+		b.overflow = true
+		return parent, false
+	}
 	n := newNode(path)
-	n.ChildrenWereProcessed = !b.overflow
 	b.nodes[path] = n
 	parent.ChildrenDirs = append(parent.ChildrenDirs, n)
-	return n
+	return n, true
 }
 
 func (b *treeBuilder) add(rel string) {
@@ -231,9 +253,9 @@ func (b *treeBuilder) add(rel string) {
 		return
 	}
 	path := filepath.Join(b.root.AbsPath, rel)
-	parent := b.dir(filepath.Dir(path))
+	parent, ok := b.dir(filepath.Dir(path))
 	name := filepath.Base(path)
-	if !b.overflow && b.lister.addFile(parent, name) {
+	if ok && !b.overflow && b.lister.addFile(parent, name) {
 		return
 	}
 	b.overflow = true
@@ -243,6 +265,28 @@ func (b *treeBuilder) add(rel string) {
 		if n == b.root {
 			break
 		}
+	}
+}
+
+// validUTF8 replaces invalid UTF-8 in the names and paths of tree, which
+// protojson cannot encode. It runs on the finished tree, since the builder
+// looks nodes up by their raw paths.
+func validUTF8(tree *treeNode) {
+	if tree == nil {
+		return
+	}
+	tree.AbsPath = strings.ToValidUTF8(tree.AbsPath, "�")
+	for _, f := range tree.ChildrenFiles {
+		f.Name = strings.ToValidUTF8(f.Name, "�")
+	}
+	for ext, n := range tree.FullSubtreeExtensionCounts {
+		if valid := strings.ToValidUTF8(ext, "�"); valid != ext {
+			delete(tree.FullSubtreeExtensionCounts, ext)
+			tree.FullSubtreeExtensionCounts[valid] += n
+		}
+	}
+	for _, child := range tree.ChildrenDirs {
+		validUTF8(child)
 	}
 }
 

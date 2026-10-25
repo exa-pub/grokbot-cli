@@ -55,9 +55,14 @@ type discoveryResult struct {
 }
 
 // secretPatterns match API keys and tokens of common providers, bearer
-// tokens, JWTs and long hex strings.
+// tokens, basic credentials, JWTs and long hex strings.
 var secretPatterns = []string{
 	`\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}\b`,
+	`\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{10,}\b`,
+	`\bglpat-[A-Za-z0-9_-]{20,}\b`,
+	`\bhf_[A-Za-z0-9]{30,}\b`,
+	`\bnpm_[A-Za-z0-9]{36}\b`,
+	`(?i:Authorization:\s*Basic\s+[A-Za-z0-9+/=]{8,})`,
 	`\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b`,
 	`\bxox[abpors]-[A-Za-z0-9-]{10,}\b`,
 	`\bAKIA[0-9A-Z]{16}\b`,
@@ -73,7 +78,9 @@ var redactors = []struct {
 	replacement string
 }{
 	{regexp.MustCompile(strings.Join(secretPatterns, "|")), "[redacted]"},
-	{regexp.MustCompile(`([=:]\s?)[A-Za-z0-9+/_-]{32,}={0,2}`), "${1}[redacted]"},
+	{regexp.MustCompile(`([=:]\s*["']?)[A-Za-z0-9+/_-]{32,}={0,2}`), "${1}[redacted]"},
+	// AWS secret access keys: 40 characters of base64, often with slashes.
+	{regexp.MustCompile(`(^|[\s"'])[A-Za-z0-9+][A-Za-z0-9+/]{39}($|[\s"',;.])`), "${1}[redacted]${2}"},
 	{regexp.MustCompile("(?i)\\b[a-z][a-z0-9+.-]*://[^\\s<>\"'`]+"), "[link]"},
 	{regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`), "[email]"},
 	{regexp.MustCompile("[A-Za-z]:\\\\[^\\s<>\"'`,;]+|(?:~|\\.{1,2})?(?:/[^\\s/<>\"'`,;)]+){2,}/?"), "[path]"},
@@ -94,7 +101,11 @@ func discoveryTitle(text string) string {
 		text = r.pattern.ReplaceAllString(text, r.replacement)
 	}
 	if units := utf16.Encode([]rune(text)); len(units) > maxTitleUnits {
-		text = string(utf16.Decode(units[:maxTitleUnits-1])) + "…"
+		n := maxTitleUnits - 1
+		if utf16.IsSurrogate(rune(units[n-1])) && units[n-1] < 0xdc00 {
+			n-- // do not split a surrogate pair
+		}
+		text = string(utf16.Decode(units[:n])) + "…"
 	}
 	return text
 }
@@ -140,17 +151,31 @@ func entryIs(path string, entry os.DirEntry, wantDir bool) (bool, error) {
 	return false, nil
 }
 
-func openDiscovery(ctx context.Context, path string) (*os.File, error) {
+// openDiscovery opens a regular file. O_NONBLOCK keeps a FIFO from blocking
+// until a writer appears.
+func openDiscovery(ctx context.Context, path string) (*os.File, os.FileInfo, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return os.Open(path) //nolint:gosec // see above
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // see above
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := f.Stat()
+	if err == nil && !st.Mode().IsRegular() {
+		err = errors.New("expected regular file: " + path)
+	}
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	return f, st, nil
 }
 
 // readConfig reads a whole configuration file; a missing file reads as
 // empty. maxConfigBytes only guards against absurd files.
 func readConfig(ctx context.Context, path string) ([]byte, error) {
-	f, err := openDiscovery(ctx, path)
+	f, _, err := openDiscovery(ctx, path)
 	if absent(err) {
 		return nil, nil
 	}
@@ -158,13 +183,6 @@ func readConfig(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !st.Mode().IsRegular() {
-		return nil, errors.New("not a regular discovery file")
-	}
 	b, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
 	if err == nil && len(b) > maxConfigBytes {
 		err = fmt.Errorf("AI tool configuration exceeds %d bytes", maxConfigBytes)
@@ -175,7 +193,7 @@ func readConfig(ctx context.Context, path string) ([]byte, error) {
 // readTail reads the last historyBytes of a file, dropping the partial first
 // line if the file was cut; a missing file reads as empty.
 func readTail(ctx context.Context, path string) ([]byte, error) {
-	f, err := openDiscovery(ctx, path)
+	f, st, err := openDiscovery(ctx, path)
 	if absent(err) {
 		return nil, nil
 	}
@@ -183,10 +201,6 @@ func readTail(ctx context.Context, path string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
 	n := min(st.Size(), historyBytes)
 	b, err := readAtMost(f, n, st.Size()-n)
 	if err != nil {
@@ -318,8 +332,9 @@ func (e *Executor) discover(ctx context.Context, source string) ([]byte, error) 
 	}
 	setup := dedupItems(d.setup)
 	setup = setup[:min(len(setup), maxSetupItems)]
+	// Newest first, so that a repeated request keeps its latest time.
+	slices.SortStableFunc(d.sessions, func(a, b discoveryItem) int { return cmp.Compare(b.OccurredAtMS, a.OccurredAtMS) })
 	sessions := dedupItems(d.sessions)
-	slices.SortStableFunc(sessions, func(a, b discoveryItem) int { return cmp.Compare(b.OccurredAtMS, a.OccurredAtMS) })
 	sessions = sessions[:min(len(sessions), maxItems-len(setup))]
 	result.Items = append(setup, sessions...)
 	result.SessionCount = max(d.sessionFiles, len(sessions))
@@ -534,14 +549,26 @@ func (d *discoverer) countSessionDir(dir string, level int) error {
 				}
 			}
 		case entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".jsonl"):
-			d.sessionFiles++
-			st, err := entry.Info()
-			if err != nil {
+			if err = d.countSession(entry); err != nil {
 				return err
 			}
-			d.lastActive = max(d.lastActive, st.ModTime().UnixMilli())
 		}
 	}
+	return nil
+}
+
+// countSession counts a session log unless it was removed after the
+// directory was read.
+func (d *discoverer) countSession(entry os.DirEntry) error {
+	st, err := entry.Info()
+	if absent(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	d.sessionFiles++
+	d.lastActive = max(d.lastActive, st.ModTime().UnixMilli())
 	return nil
 }
 

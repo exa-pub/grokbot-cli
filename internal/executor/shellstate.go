@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -14,14 +15,16 @@ import (
 )
 
 // Foreground commands share one shell state: cwd, exported environment,
-// options, aliases and functions. The user's profile is read once, by an
+// options and functions. Aliases are not kept or expanded: they come from
+// interactive profiles, are meant for people (rm -i) and would make commands
+// behave differently than written. The user's profile is read once, by an
 // interactive login shell that only dumps its state; every command then runs
 // in a fresh non-login shell that replays the state, runs the command and
 // dumps the state again.
 //
 // Descriptors of a foreground shell:
 //
-//	3  replay script (options, functions, aliases), read and closed first
+//	3  replay script (options, functions), read and closed first
 //	4  state snapshot, closed while the command runs
 //	5  command text, read and closed first
 //
@@ -30,9 +33,14 @@ import (
 // killed by a signal, bash runs it with the command's descriptors, so a
 // command that ran "exec 4>&1" would print the whole environment. The command
 // runs as "eval ... 4>&-"; bash and zsh restore descriptor 4 after eval even if
-// the command reassigned it, and children never inherit it. A command that
-// ends the shell itself (exit, exec, set -e, a signal) leaves no snapshot and
-// the previous state stays in effect.
+// the command reassigned it, and children never inherit it.
+//
+// A command that ends the shell itself (exit, set -e) is still saved by an
+// EXIT trap, as a fallback. The trap writes to a file named by a read-only
+// variable, never to an inherited descriptor, so the command cannot redirect
+// it; it does nothing in subshells or once the regular dump has run. A command
+// that replaces the trap, execs another program or is killed leaves no
+// snapshot, and the previous state stays in effect; the agent is told so.
 //
 // The state and the command reach the shell through files, not arguments:
 // Linux limits a single argument to 128 KiB, and functions from a profile or
@@ -44,7 +52,6 @@ const (
 	// sectionPrefix tags the non-environment parts of a state snapshot.
 	sectionPrefix    = "GROK_SHELL_"
 	sectionOptions   = sectionPrefix + "OPTIONS"
-	sectionAliases   = sectionPrefix + "ALIASES"
 	sectionFunctions = sectionPrefix + "FUNCTIONS"
 	sectionEnd       = sectionPrefix + "END"
 )
@@ -59,11 +66,13 @@ var agentEnv = []string{"CURSOR_AGENT=1", "SAND_AGENT=1"}
 var volatileEnv = []string{"SHLVL", "_", "PWD"}
 
 // volatileOptions are not carried over. errexit, nounset and pipefail would
-// change how every later command and the state dump behave; the others are
-// set by the interactive shell that reads the profile, and job control
-// (monitor) would move background jobs out of the command's process group.
+// change how every later command and the state dump behave, and xtrace and
+// verbose would trace the replay; the others are set by the interactive shell
+// that reads the profile, and job control (monitor) would move background jobs
+// out of the command's process group. Alias expansion stays off.
 var volatileOptions = map[string]bool{
 	"errexit": true, "errreturn": true, "unset": true, "nounset": true, "pipefail": true,
+	"xtrace": true, "verbose": true, "aliases": true, "expandaliases": true,
 	"monitor": true, "interactive": true, "shinstdin": true, "zle": true, "login": true,
 	"privileged": true, "restricted": true, "singlecommand": true, "onecmd": true, "exec": true,
 	"history": true, "histexpand": true, "emacs": true, "vi": true,
@@ -75,7 +84,6 @@ type shellState struct {
 	cwd       string
 	env       []string // nil means the CLI's own environment
 	options   []string // "set -o x" / "shopt -s x" lines
-	aliases   string
 	functions string
 }
 
@@ -97,30 +105,32 @@ func userShell() shell {
 	return shell{path: path, zsh: filepath.Base(name) == "zsh"}
 }
 
-// args runs script with the glob extensions the desktop enables; name is $0.
-func (s shell) args(flags, script, name string) []string {
+// args runs script with the glob extensions the desktop enables; name is $0
+// and params are the positional parameters.
+func (s shell) args(flags, script, name string, params ...string) []string {
+	args := make([]string, 0, 5+len(params))
 	if s.zsh {
-		return []string{"-o", "extendedglob", flags, script, name}
+		args = append(args, "-o", "extendedglob")
+	} else {
+		args = append(args, "-O", "extglob")
 	}
-	return []string{"-O", "extglob", flags, script, name}
+	return append(append(args, flags, script, name), params...)
 }
 
 // dump writes the state as NUL-separated cwd and environment, then tagged
-// option, alias and function sections and an end tag. Command output cannot be
+// option and function sections and an end tag. Command output cannot be
 // mistaken for state, and state is replayed from a file, not parsed back from
 // output.
 func (s shell) dump() string {
-	options, aliases := `builtin set +o; builtin shopt -p`, `builtin alias -p`
+	options := `builtin set +o; builtin shopt -p`
 	if s.zsh {
-		options, aliases = `builtin set +o`, `builtin alias -L; builtin alias -gL; builtin alias -sL`
+		options = `builtin set +o`
 	}
 	return strings.Join([]string{
 		`builtin printf '%s\0' "$PWD"`,
 		`/usr/bin/env -0`,
 		`builtin printf '\0` + sectionOptions + `\0'`,
 		options,
-		`builtin printf '\0` + sectionAliases + `\0'`,
-		aliases,
 		`builtin printf '\0` + sectionFunctions + `\0'`,
 		`builtin typeset -f`,
 		`builtin printf '\0` + sectionEnd + `\0'`,
@@ -133,32 +143,40 @@ func (s shell) initScript() string {
 }
 
 // prepare reads the replay script from descriptor 3 and the command from
-// descriptor 5, closes both and replays the state, leaving the command in $1.
-// The descriptors are closed with a bare exec before the replay, which could
-// define a function named exec; "builtin exec" would only close them for the
-// duration of the builtin.
+// descriptor 5 into $__grok_cmd, closes both and replays the state. The
+// command runs from a variable rather than $1, so that it sees no positional
+// parameters and eval reports its line numbers unchanged. The descriptors are
+// closed with a bare exec before the replay, which could define a function
+// named exec; "builtin exec" would only close them for the duration of the
+// builtin.
 func (s shell) prepare() string {
-	unalias, aliases := "", `builtin shopt -s expand_aliases 2>/dev/null`
+	unalias := `builtin shopt -u expand_aliases 2>/dev/null; `
 	if s.zsh {
-		// Aliases from .zshenv must not change how the replayed functions parse.
+		// zsh expands aliases even when not interactive; aliases from
+		// .zshenv must not change how the replayed functions parse either.
 		unalias = `builtin unsetopt aliases 2>/dev/null; builtin unalias -m '*' 2>/dev/null; `
-		aliases = `builtin setopt aliases 2>/dev/null`
 	}
 	return `__grok_cmd=$(</dev/fd/5) && __grok_replay=$(</dev/fd/3) || { ` +
 		`builtin printf '%s\n' 'The command did not run: a shell startup file ($BASH_ENV or .zshenv) closed descriptor 3 or 5.' >&2; ` +
 		`builtin exit 126; }; ` +
 		`exec 3<&- 5<&-; ` +
-		unalias + `builtin eval -- "$__grok_replay"; builtin unset __grok_replay; ` +
-		aliases + `; ` +
-		`builtin set -- "$__grok_cmd"; builtin unset __grok_cmd; `
+		unalias + `builtin eval -- "$__grok_replay"; builtin unset __grok_replay; `
 }
 
 // foregroundScript runs the command with descriptor 4 closed and then dumps
-// the state to it.
+// the state to it. $1 names the fallback snapshot file for the EXIT trap.
 func (s shell) foregroundScript() string {
-	return s.prepare() +
-		`builtin eval -- "$1" 4>&-; __grok_exit=$?; ` +
-		`{ ` + s.dump() + `; } >&4 2>/dev/null; ` +
+	subshell := "BASH_SUBSHELL"
+	if s.zsh {
+		subshell = "ZSH_SUBSHELL"
+	}
+	trap := `{ builtin set +xveu; builtin test -z "$__grok_dumped" && builtin test "$` + subshell + `" = 0 && ` +
+		`{ ` + s.dump() + `; } >"$__grok_fallback"; } 2>/dev/null`
+	return `builtin readonly __grok_fallback="$1"; builtin set --; ` +
+		s.prepare() +
+		`builtin trap ` + shellQuote(trap) + ` EXIT; ` +
+		`builtin eval -- "$__grok_cmd" 4>&-; ` +
+		`{ __grok_exit=$?; __grok_dumped=1; builtin set +xv; builtin unset __grok_cmd; ` + s.dump() + `; } >&4 2>/dev/null; ` +
 		`builtin exit "$__grok_exit"`
 }
 
@@ -167,7 +185,12 @@ func (s shell) foregroundScript() string {
 // state but does not save it.
 func (s shell) backgroundScript() string {
 	return `IFS= builtin read -r __grok_start <&4; exec 4<&-; builtin unset __grok_start; ` +
-		s.prepare() + `builtin eval -- "$1"`
+		s.prepare() + `builtin eval -- "$__grok_cmd"`
+}
+
+// shellQuote quotes s as a single word for bash and zsh.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // replayScript returns the shell code that restores st. Functions come first,
@@ -180,8 +203,6 @@ func (st shellState) replayScript() string {
 	for _, option := range st.options {
 		b.WriteString(option + " 2>/dev/null\n")
 	}
-	b.WriteString(st.aliases)
-	b.WriteString("\n")
 	return b.String()
 }
 
@@ -226,23 +247,30 @@ func (e *Executor) setShellState(st shellState) {
 }
 
 // initShell captures the state of the user's profile once, before the first
-// command. A profile that fails or hangs leaves the CLI's environment.
-func (e *Executor) initShell() {
-	e.initMu.Lock()
-	defer e.initMu.Unlock()
-	if e.initialized {
-		return
+// command. A profile that fails or hangs leaves the CLI's environment. If ctx
+// ends first, the profile keeps loading for the next command.
+func (e *Executor) initShell(ctx context.Context) error {
+	e.initOnce.Do(func() {
+		e.initDone = make(chan struct{})
+		go func() {
+			defer close(e.initDone)
+			st, err := e.profileState()
+			if err != nil {
+				log.Printf("shell profile: %v; using the CLI environment", err)
+				return
+			}
+			if !e.validCwd(st.cwd) {
+				st.cwd = ""
+			}
+			e.setShellState(st)
+		}()
+	})
+	select {
+	case <-e.initDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	e.initialized = true
-	st, err := e.profileState()
-	if err != nil {
-		log.Printf("shell profile: %v; using the CLI environment", err)
-		return
-	}
-	if !e.validCwd(st.cwd) {
-		st.cwd = ""
-	}
-	e.setShellState(st)
 }
 
 func (e *Executor) profileState() (shellState, error) {
@@ -285,23 +313,36 @@ func (e *Executor) profileState() (shellState, error) {
 	return st, nil
 }
 
-// adoptState returns the state a foreground command left in its snapshot.
-// Commands that ended the shell themselves leave none. A cwd outside Root is
-// not kept; the next command starts where this one did.
-func (e *Executor) adoptState(f *os.File, cwd string) (shellState, bool) {
+// adoptState returns the state a foreground command left in its snapshot or,
+// if it ended the shell itself, in the fallback snapshot of its EXIT trap,
+// together with a notice for the agent, if any. A command that left no state
+// returns nil. A cwd outside Root is not kept; the next command starts where
+// this one did.
+func (e *Executor) adoptState(snapshot, fallback *os.File, cwd string) (*shellState, string) {
+	st, ok := readState(snapshot)
+	if !ok {
+		st, ok = readState(fallback)
+	}
+	if !ok {
+		return nil, "The shell exited before its state could be saved (exec, a signal or a replaced EXIT trap); " +
+			"changes to the working directory, environment, options and functions were not kept.\n"
+	}
+	notice := ""
+	if !e.validCwd(st.cwd) {
+		notice = fmt.Sprintf("Working directory %s is outside %s or no longer exists; the next command starts in %s.\n",
+			st.cwd, e.Root, cwd)
+		st.cwd = cwd
+	}
+	return &st, notice
+}
+
+func readState(f *os.File) (shellState, bool) {
 	b, err := readSnapshot(f)
 	if err != nil {
 		log.Printf("read shell state: %v", err)
 		return shellState{}, false
 	}
-	st, ok := parseSnapshot(b)
-	if !ok {
-		return shellState{}, false
-	}
-	if !e.validCwd(st.cwd) {
-		st.cwd = cwd
-	}
-	return st, true
+	return parseSnapshot(b)
 }
 
 // validCwd reports whether dir is a directory below Root.
@@ -352,7 +393,6 @@ func parseSnapshot(b []byte) (shellState, bool) {
 		}
 	}
 	st.options = parseOptions(sections[sectionOptions])
-	st.aliases = sections[sectionAliases]
 	st.functions = sections[sectionFunctions]
 	return st, true
 }

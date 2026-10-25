@@ -47,21 +47,31 @@ func decodeBody(r *http.Response) (*http.Response, error) {
 	var reader io.Reader
 	var closer io.Closer
 	var err error
-	switch r.Header.Get("Content-Encoding") {
+	encoding := r.Header.Get("Content-Encoding")
+	if encoding != "br" && encoding != "gzip" && encoding != "deflate" {
+		return r, nil
+	}
+	body := bufio.NewReader(r.Body)
+	// Empty bodies (204, 304, HEAD, bare errors) are passed through: they
+	// carry no compressed stream, so decoding them would fail.
+	if _, peekErr := body.Peek(1); errors.Is(peekErr, io.EOF) {
+		encoding = ""
+	}
+	switch encoding {
 	case "br":
-		reader = brotli.NewReader(r.Body)
+		reader = brotli.NewReader(body)
 	case "gzip":
 		var gz *gzip.Reader
-		if gz, err = gzip.NewReader(r.Body); err == nil {
+		if gz, err = gzip.NewReader(body); err == nil {
 			reader, closer = gz, gz
 		}
 	case "deflate":
 		var rc io.ReadCloser
-		if rc, err = inflate(r.Body); err == nil {
+		if rc, err = inflate(body); err == nil {
 			reader, closer = rc, rc
 		}
 	default:
-		return r, nil
+		reader = body
 	}
 	if err != nil {
 		return nil, errors.Join(err, r.Body.Close())
@@ -82,8 +92,9 @@ func inflate(body io.Reader) (io.ReadCloser, error) {
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	// A zlib header is a big-endian 16-bit multiple of 31.
-	if len(header) == 2 && (uint16(header[0])<<8|uint16(header[1]))%31 == 0 {
+	// A zlib header names compression method 8 (deflate) and is a big-endian
+	// 16-bit multiple of 31.
+	if len(header) == 2 && header[0]&0x0f == 8 && (uint16(header[0])<<8|uint16(header[1]))%31 == 0 {
 		return zlib.NewReader(buf)
 	}
 	return flate.NewReader(buf), nil

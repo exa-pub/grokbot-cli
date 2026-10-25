@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"net/http"
 	"runtime"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -91,8 +90,8 @@ func (t Transport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func (t Transport) ghostMode(r *http.Request) string {
-	// The privacy lookup itself is always private and must not recurse.
-	if t.Privacy == nil || strings.HasSuffix(r.URL.Path, "/GetUserPrivacyMode") {
+	// The privacy lookup itself goes through PrivacyHTTP, which has no Privacy.
+	if t.Privacy == nil {
 		return ghostOn
 	}
 	return t.Privacy.Ghost(r.Context())

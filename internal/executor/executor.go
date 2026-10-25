@@ -32,7 +32,8 @@ const (
 	streamChunk        = 16 << 10
 	defaultListTimeout = 5 * time.Second
 	terminalsDir       = "terminals"
-	// waitDelay bounds how long Wait blocks on pipes held open by grandchildren.
+	// waitDelay bounds how long a finished command's output is still
+	// forwarded while background jobs it started hold its pipes open.
 	waitDelay = time.Second
 )
 
@@ -65,9 +66,10 @@ type Executor struct {
 	foreground chan struct{}
 	stateMu    sync.Mutex // guards state
 	state      shellState
-	// initMu serializes reading the user's profile into state, once.
-	initMu      sync.Mutex
-	initialized bool
+	// initOnce starts reading the user's profile into state; initDone is
+	// closed once it is done.
+	initOnce sync.Once
+	initDone chan struct{}
 }
 
 // New opens an executor rooted at root, resolving symlinks in root itself.
@@ -288,7 +290,7 @@ func (e *Executor) exec(ctx context.Context, msg *agentv1.ExecServerMessage, sen
 		return e.shell(ctx, msg.GetShellStreamArgs(), send)
 	case msg.GetBackgroundShellSpawnArgs() != nil:
 		x := msg.GetBackgroundShellSpawnArgs()
-		result, err := e.background(x.Command, x.WorkingDirectory)
+		result, err := e.background(ctx, x.Command, x.WorkingDirectory)
 		if err != nil {
 			return err
 		}

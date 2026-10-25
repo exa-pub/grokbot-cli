@@ -55,11 +55,7 @@ func Login(ctx context.Context, opts LoginOptions, out io.Writer) error {
 	if opts.TeamID != "" {
 		identity.TeamID = opts.TeamID
 	}
-	if err = e.store.Save("auth", identity); err != nil {
-		return err
-	}
-	// Computer credentials belong to the previous account.
-	if err = e.store.Save("computer", config.Computer{}); err != nil {
+	if err = saveLogin(ctx, e.store, identity); err != nil {
 		return err
 	}
 
@@ -70,6 +66,11 @@ func Login(ctx context.Context, opts LoginOptions, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("tokens saved; profile verification failed: %w", err)
 	}
+	unlock, err := e.store.Lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	identity = u.tokens.Snapshot()
 	identity.Email = me.Msg.GetEmail()
 	identity.AuthID = me.Msg.GetAuthId()
@@ -78,6 +79,21 @@ func Login(ctx context.Context, opts LoginOptions, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "Logged in as %s\n", identity.Email)
 	return nil
+}
+
+// saveLogin replaces the saved identity. It holds the store lock so that a
+// concurrent token refresh in another process cannot overwrite the new login.
+func saveLogin(ctx context.Context, store *config.Store, identity config.Auth) error {
+	unlock, err := store.Lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err = store.Save("auth", identity); err != nil {
+		return err
+	}
+	// Computer credentials belong to the previous account.
+	return store.Save("computer", config.Computer{})
 }
 
 // openBrowser opens url in the desktop browser without waiting for it.

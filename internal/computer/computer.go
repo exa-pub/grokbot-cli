@@ -17,6 +17,7 @@ import (
 
 	"github.com/exa-pub/grokbot-cli/internal/config"
 	"github.com/exa-pub/grokbot-cli/internal/executor"
+	agentv1 "github.com/exa-pub/grokbot-cli/internal/gen/agent/v1"
 	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
 	rpc "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1/aiserverv1connect"
 	"github.com/exa-pub/grokbot-cli/internal/permission"
@@ -47,6 +48,8 @@ const (
 	pollInterval      = 30 * time.Second
 	keepAliveInterval = 2 * time.Second
 	shutdownGrace     = 8 * time.Second
+	// Part of shutdownGrace kept for the final submit after waiting for workers.
+	finalFlushGrace = 2 * time.Second
 )
 
 var errBacklogFull = errors.New("response backlog full")
@@ -124,6 +127,21 @@ type task struct {
 	cancel context.CancelFunc // nil until the task starts
 }
 
+// submitted is the outcome of a submit RPC run off the Run goroutine.
+type submitted struct {
+	credential string
+	frames     []*responseFrame
+	accepted   int
+	err        error
+}
+
+// polled is the outcome of a poll RPC run off the Run goroutine.
+type polled struct {
+	credential string
+	requests   []*aiserverv1.GrokBotUserComputerQueuedRequest
+	err        error
+}
+
 // watched is an event or the terminal error of a watch stream.
 type watched struct {
 	event      *aiserverv1.WatchGrokBotUserComputerRequestsEvent
@@ -156,7 +174,7 @@ func (d *dedup) add(id string) bool {
 }
 
 // session holds the state of Run. All fields are owned by the Run goroutine;
-// workers talk to it only through the channels.
+// workers and the submit and poll RPCs talk to it only through the channels.
 type session struct {
 	pv *Provider
 
@@ -170,6 +188,10 @@ type session struct {
 	replies chan *responseFrame
 	done    chan string
 	events  chan watched
+	// At most one submit and one poll are in flight; their results come back
+	// on these channels, buffered so an abandoned RPC never blocks.
+	submitted chan submitted
+	polled    chan polled
 
 	tasks    map[string]*task
 	backlog  []string
@@ -183,6 +205,11 @@ type session struct {
 	previousFile bool
 	// Cached credentials are reused only for the same account, backend and machine.
 	credential config.Computer
+	// issuedAt is the local time the credential was issued; zero if unknown.
+	issuedAt time.Time
+	// Failed credential renewals are retried with their own backoff.
+	nextRenew    time.Time
+	renewBackoff time.Duration
 
 	watchCancel    context.CancelFunc
 	generation     int
@@ -193,20 +220,31 @@ type session struct {
 	nextDial       time.Time
 	backoff        time.Duration
 	needPoll       bool
+	nextPoll       time.Time
+	pollBackoff    time.Duration
+	polling        bool
+
+	submitting     bool
+	submitFailures int // consecutive submits without progress
+	nextSubmit     time.Time
 }
 
 func newSession(ctx context.Context, pv *Provider) *session {
 	s := &session{
-		pv:         pv,
-		replies:    make(chan *responseFrame, submitBatch),
-		done:       make(chan string, maxActive),
-		events:     make(chan watched, 16),
-		tasks:      map[string]*task{},
-		seen:       newDedup(),
-		requests:   newDedup(),
-		canceled:   newDedup(),
-		backoff:    minBackoff,
-		credential: pv.cachedCredential(),
+		pv:           pv,
+		replies:      make(chan *responseFrame, submitBatch),
+		done:         make(chan string, maxActive),
+		events:       make(chan watched, 16),
+		submitted:    make(chan submitted, 1),
+		polled:       make(chan polled, 1),
+		tasks:        map[string]*task{},
+		seen:         newDedup(),
+		requests:     newDedup(),
+		canceled:     newDedup(),
+		backoff:      minBackoff,
+		renewBackoff: minBackoff,
+		pollBackoff:  minBackoff,
+		credential:   pv.cachedCredential(),
 	}
 	s.life, s.stopLife = context.WithCancel(context.Background())
 	s.work, s.stopWork = context.WithCancel(ctx)
@@ -265,6 +303,9 @@ func (s *session) take(f *responseFrame) bool {
 	if s.dropped(f) {
 		return false
 	}
+	if s.canceled.has(f.RequestId) {
+		f = canceledFile(f)
+	}
 	s.queue(f)
 	return len(s.pending) >= submitBatch
 }
@@ -284,9 +325,43 @@ func (s *session) closeCanceled(f *requestFrame) {
 }
 
 // dropped reports whether a reply belongs to a canceled request. Control
-// frames still go through so the request's stream is closed.
+// and terminal frames still go through so the request's stream is closed.
 func (s *session) dropped(f *responseFrame) bool {
-	return s.canceled.has(f.RequestId) && f.GetControl() == nil
+	return s.canceled.has(f.RequestId) && f.GetControl() == nil && !terminal(f)
+}
+
+// terminal reports whether f is the final frame of a non-exec request.
+func terminal(f *responseFrame) bool {
+	return f.GetFileError() != nil || f.GetMessagesError() != nil || f.GetLocalToolResult() != nil || f.GetFile().GetLast()
+}
+
+// closes reports whether f ends its request's stream.
+func closes(f *responseFrame) bool {
+	if terminal(f) {
+		return true
+	}
+	if f.GetControl() == nil {
+		return false
+	}
+	var msg agentv1.ExecClientControlMessage
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal([]byte(f.GetControl().MessageJson), &msg); err != nil {
+		return false
+	}
+	return msg.GetStreamClose() != nil || msg.GetThrow() != nil
+}
+
+// canceledFile replaces the last chunk of a canceled transfer, whose earlier
+// chunks were dropped, with the error a canceled request reports.
+func canceledFile(f *responseFrame) *responseFrame {
+	if f.GetFile() == nil {
+		return f
+	}
+	return &responseFrame{
+		RequestId: f.RequestId,
+		Frame: &aiserverv1.GrokBotUserComputerResponseFrame_FileError{
+			FileError: &aiserverv1.GrokBotUserComputerFileError{Error: context.Canceled.Error()},
+		},
+	}
 }
 
 func (s *session) run(ctx context.Context) error {
@@ -302,8 +377,12 @@ func (s *session) run(ctx context.Context) error {
 		case <-ctx.Done():
 			s.shutdown()
 			return nil
-		case f := <-s.replies:
-			err = s.onReply(ctx, f)
+		case f := <-s.acceptReplies():
+			s.onReply(f)
+		case r := <-s.submitted:
+			err = s.onSubmitted(r)
+		case r := <-s.polled:
+			s.onPolled(r)
 		case id := <-s.done:
 			s.finish(id)
 			s.startJobs()
@@ -323,26 +402,39 @@ func (s *session) run(ctx context.Context) error {
 	}
 }
 
-func (s *session) onReply(ctx context.Context, f *responseFrame) error {
-	if !s.take(f) {
+// acceptReplies returns the replies channel, or nil to make workers wait
+// while enough frames are pending, as a blocking submit used to.
+func (s *session) acceptReplies() chan *responseFrame {
+	if s.stuck() >= maxPending || (s.submitting && len(s.pending) >= submitBatch) {
 		return nil
 	}
-	return s.flush(ctx)
+	return s.replies
 }
 
-// flush submits pending frames and fails once too many are stuck.
-func (s *session) flush(ctx context.Context) error {
-	err := s.submit(ctx)
-	if err != nil {
-		log.Printf("submit: %v", err)
+func (s *session) onReply(f *responseFrame) {
+	if s.take(f) {
+		s.startSubmit()
 	}
-	if len(s.pending) < maxPending {
+}
+
+// overflow fails the session once a failed submit leaves too many frames stuck.
+func (s *session) overflow(err error) error {
+	if s.stuck() < maxPending {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("%w: %w", errBacklogFull, err)
+	return fmt.Errorf("%w: %w", errBacklogFull, err)
+}
+
+// stuck counts the pending frames other than keepalives, which are bounded
+// by the number of requests and must not end the session on their own.
+func (s *session) stuck() int {
+	n := 0
+	for _, f := range s.pending {
+		if f.GetMessagesAccepted() == nil {
+			n++
+		}
 	}
-	return errBacklogFull
+	return n
 }
 
 func (s *session) finish(id string) {
@@ -379,19 +471,28 @@ func hasWork(ev *aiserverv1.WatchGrokBotUserComputerRequestsEvent) bool {
 }
 
 // keepAlive tells the server that accepted requests are still being handled.
+// A request gets at most one pending keepalive, and none while it waits in the
+// backlog or once its stream is closed.
 func (s *session) keepAlive() {
 	if s.credential.Credential == "" {
 		return // could not be delivered anyway
 	}
 	ids := map[string]bool{}
-	for id := range s.tasks {
-		ids[id] = true
+	for id, t := range s.tasks {
+		ids[id] = t.cancel != nil // started
 	}
 	for _, f := range s.pending {
-		ids[f.RequestId] = true
+		if _, ok := s.tasks[f.RequestId]; !ok {
+			ids[f.RequestId] = true // finished, results not yet delivered
+		}
 	}
-	for id := range ids {
-		if s.canceled.has(id) {
+	for _, f := range s.pending {
+		if f.GetMessagesAccepted() != nil || closes(f) {
+			ids[f.RequestId] = false
+		}
+	}
+	for id, alive := range ids {
+		if !alive || s.canceled.has(id) {
 			continue
 		}
 		s.queue(&responseFrame{
@@ -411,26 +512,42 @@ func (s *session) onTick(ctx context.Context) error {
 	if ready, err := s.ensureCredential(ctx); !ready {
 		return err
 	}
+	// Events that queued up while Run was busy prove the stream is alive.
+	s.drainEvents()
 	switch {
 	case !s.watchAlive && !s.now().Before(s.nextDial):
 		s.startWatch()
 		s.needPoll = true
-	case s.watchAlive && s.lastStanding != s.pv.Policy.Standing():
+	case s.watchAlive && s.lastStanding != s.standing():
 		// Reconnect to announce the new standing mode.
 		s.startWatch()
 	case s.watchAlive && s.now().Sub(s.lastEvent) > s.watchTimeout():
 		s.dropStaleWatch()
 	}
-	if len(s.pending) > 0 {
-		if err := s.flush(ctx); err != nil {
-			return err
+	s.startSubmit()
+	s.startPoll()
+	return nil
+}
+
+// drainEvents applies the watch events already buffered in the channel.
+func (s *session) drainEvents() {
+	for range cap(s.events) {
+		select {
+		case ev := <-s.events:
+			s.onEvent(ev)
+		default:
+			return
 		}
 	}
-	if s.needPoll && s.credential.Credential != "" {
-		s.needPoll = false
-		s.poll(ctx)
+}
+
+// standing is the standing mode announced in hello; the server decides
+// in server-authoritative mode, so none is sent.
+func (s *session) standing() string {
+	if s.credential.ServerAuthoritative {
+		return ""
 	}
-	return nil
+	return s.pv.Policy.Standing()
 }
 
 // stopWatch cancels the watch stream and ignores its cancellation event.
@@ -449,20 +566,33 @@ func (s *session) dropStaleWatch() {
 	s.increaseBackoff()
 }
 
-// ensureCredential issues a new credential when the current one is missing or
-// about to expire. It reports whether a usable credential is available.
-func (s *session) ensureCredential(ctx context.Context) (bool, error) {
+// renewAt returns when the credential should be renewed: credentialMargin
+// before it expires, or halfway through its lifetime if that is shorter.
+func (s *session) renewAt() time.Time {
 	expiresAt := time.UnixMilli(s.credential.ExpiresAtMS)
-	if s.credential.Credential != "" && expiresAt.Sub(s.now()) > credentialMargin {
+	margin := credentialMargin
+	if !s.issuedAt.IsZero() {
+		margin = min(margin, expiresAt.Sub(s.issuedAt)/2)
+	}
+	return expiresAt.Add(-margin)
+}
+
+// ensureCredential issues a new credential when the current one is missing or
+// due for renewal. It reports whether a usable credential is available; a
+// failed renewal keeps using the old credential until it expires.
+func (s *session) ensureCredential(ctx context.Context) (bool, error) {
+	now := s.now()
+	if s.credential.Credential != "" && now.Before(s.renewAt()) {
 		return true, nil
 	}
+	usable := s.credential.Credential != "" && now.Before(time.UnixMilli(s.credential.ExpiresAtMS))
 	select {
 	case <-ctx.Done():
 		return false, nil // shutting down
 	default:
 	}
-	if s.now().Before(s.nextDial) {
-		return false, nil
+	if now.Before(s.nextRenew) {
+		return usable, nil
 	}
 	c, err := s.pv.issue(ctx)
 	switch {
@@ -470,11 +600,14 @@ func (s *session) ensureCredential(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("computer registration refused: %w", err)
 	case err != nil:
 		log.Printf("credential: %v", err)
-		s.nextDial = s.now().Add(s.backoff)
-		s.increaseBackoff()
-		return false, nil
+		s.nextRenew = s.now().Add(s.renewBackoff)
+		s.renewBackoff = min(maxBackoff, s.renewBackoff*2)
+		return usable, nil
 	}
 	s.credential = c
+	s.issuedAt = now
+	s.nextRenew = time.Time{}
+	s.renewBackoff = minBackoff
 	s.startWatch()
 	s.needPoll = true
 	return true, nil
@@ -486,7 +619,7 @@ func (s *session) startWatch() {
 	gen := s.generation
 	ctx, cancel := context.WithCancel(s.work)
 	s.watchCancel = cancel
-	s.lastStanding = s.pv.Policy.Standing()
+	s.lastStanding = s.standing()
 	s.watchAlive = true
 	s.watchConnected = false
 	s.lastEvent = s.now()
@@ -546,12 +679,21 @@ func (s *session) startJobs() {
 	}
 }
 
+// invalidateFor is invalidate for an RPC made with credential; a result for a
+// credential that has since been replaced says nothing about the current one.
+func (s *session) invalidateFor(credential string, err error) {
+	if credential == s.credential.Credential {
+		s.invalidate(err)
+	}
+}
+
 // invalidate drops the credential if err shows the server rejected it.
 func (s *session) invalidate(err error) {
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		return
 	}
 	s.credential = config.Computer{}
+	s.issuedAt = time.Time{}
 	if s.pv.Store != nil {
 		if err := s.pv.Store.Save("computer", s.credential); err != nil {
 			log.Printf("forget computer credential: %v", err)
@@ -594,52 +736,130 @@ func (s *session) submit(ctx context.Context) error {
 }
 
 func (s *session) submitOnce(ctx context.Context) error {
+	frames := s.batch()
+	n, err := s.pv.submitFrames(ctx, s.credential.Credential, frames)
+	s.accepted(frames, n)
+	return err
+}
+
+// submitFrames sends one batch and returns how many frames the server
+// accepted. It does not touch session state, so it may run on any goroutine.
+func (pv *Provider) submitFrames(ctx context.Context, credential string, frames []*responseFrame) (int, error) {
 	ctx, cancel := rpcContext(ctx)
 	defer cancel()
 	req := &aiserverv1.SubmitGrokBotUserComputerResponsesRequest{
-		MachineId:  s.pv.Machine.MachineID,
-		Credential: s.credential.Credential,
-		Frames:     s.batch(),
+		MachineId:  pv.Machine.MachineID,
+		Credential: credential,
+		Frames:     frames,
 	}
-	r, err := s.pv.Channel.SubmitGrokBotUserComputerResponses(ctx, connect.NewRequest(req))
+	r, err := pv.Channel.SubmitGrokBotUserComputerResponses(ctx, connect.NewRequest(req))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	n := int(r.Msg.AcceptedCount)
-	if n > len(req.Frames) {
-		return fmt.Errorf("invalid accepted_count %d", n)
+	if n > len(frames) {
+		return 0, fmt.Errorf("invalid accepted_count %d", n)
 	}
-	accepted := map[*responseFrame]bool{}
-	for _, f := range req.Frames[:n] {
-		accepted[f] = true
+	if n < len(frames) {
+		return n, fmt.Errorf("server accepted only %d response frames", n)
 	}
-	s.pending = slices.DeleteFunc(s.pending, func(f *responseFrame) bool { return accepted[f] })
-	if n < len(req.Frames) {
-		return fmt.Errorf("server accepted only %d response frames", n)
-	}
-	return nil
+	return n, nil
 }
 
-// poll fetches queued requests and acknowledges the previous batch.
-func (s *session) poll(ctx context.Context) {
-	call, cancel := rpcContext(ctx)
-	defer cancel()
+// accepted removes the first n frames of a submitted batch from pending.
+func (s *session) accepted(frames []*responseFrame, n int) {
+	done := map[*responseFrame]bool{}
+	for _, f := range frames[:n] {
+		done[f] = true
+	}
+	s.pending = slices.DeleteFunc(s.pending, func(f *responseFrame) bool { return done[f] })
+}
+
+// startSubmit sends the next batch in the background unless a submit is
+// already in flight or backing off. The submit outlives shutdown, which waits
+// for it: aborting a batch the server may have accepted would resend it.
+func (s *session) startSubmit() {
+	if s.submitting || len(s.pending) == 0 || s.credential.Credential == "" || s.now().Before(s.nextSubmit) {
+		return
+	}
+	s.submitting = true
+	credential, frames := s.credential.Credential, s.batch()
+	go func() {
+		n, err := s.pv.submitFrames(s.life, credential, frames)
+		s.submitted <- submitted{credential: credential, frames: frames, accepted: n, err: err}
+	}()
+}
+
+// onSubmitted applies a submit result and keeps draining pending, retrying
+// briefly on failure like submit does.
+func (s *session) onSubmitted(r submitted) error {
+	s.submitting = false
+	s.accepted(r.frames, r.accepted)
+	if r.err != nil {
+		s.invalidateFor(r.credential, r.err)
+	}
+	if r.accepted > 0 {
+		s.submitFailures = 0
+		s.nextSubmit = time.Time{}
+		s.startSubmit()
+		return nil
+	}
+	s.submitFailures++
+	if s.submitFailures < submitAttempts && s.credential.Credential != "" {
+		s.nextSubmit = s.now().Add(time.Duration(s.submitFailures) * 200 * time.Millisecond)
+		return nil
+	}
+	// A full round failed; the next tick starts another one.
+	log.Printf("submit: %v", r.err)
+	s.submitFailures = 0
+	s.nextSubmit = time.Time{}
+	return s.overflow(r.err)
+}
+
+// startPoll fetches queued requests in the background and acknowledges the
+// previous batch. Shutdown abandons it.
+func (s *session) startPoll() {
+	if s.polling || !s.needPoll || s.credential.Credential == "" || s.now().Before(s.nextPoll) {
+		return
+	}
+	s.needPoll = false
+	s.polling = true
+	credential := s.credential.Credential
 	req := &aiserverv1.PollGrokBotUserComputerRequestsRequest{
 		MachineId:  s.pv.Machine.MachineID,
-		Credential: s.credential.Credential,
+		Credential: credential,
 		AckIds:     s.acks,
 		Limit:      pollLimit,
 	}
-	r, err := s.pv.Channel.PollGrokBotUserComputerRequests(call, connect.NewRequest(req))
-	if err != nil {
-		s.invalidate(err)
-		if !errors.Is(err, context.Canceled) {
-			log.Printf("poll: %v", err)
+	go func() {
+		ctx, cancel := rpcContext(s.work)
+		defer cancel()
+		r, err := s.pv.Channel.PollGrokBotUserComputerRequests(ctx, connect.NewRequest(req))
+		result := polled{credential: credential, err: err}
+		if err == nil {
+			result.requests = r.Msg.Requests
 		}
+		s.polled <- result
+	}()
+}
+
+// onPolled applies a poll result.
+func (s *session) onPolled(r polled) {
+	s.polling = false
+	if r.err != nil {
+		s.invalidateFor(r.credential, r.err)
+		if !errors.Is(r.err, context.Canceled) {
+			log.Printf("poll: %v", r.err)
+		}
+		// Retry with backoff instead of waiting for the next poll interval.
+		s.needPoll = true
+		s.nextPoll = s.now().Add(s.pollBackoff)
+		s.pollBackoff = min(maxBackoff, s.pollBackoff*2)
 		return
 	}
+	s.pollBackoff = minBackoff
 	s.acks = nil
-	for _, q := range r.Msg.Requests {
+	for _, q := range r.requests {
 		s.acks = append(s.acks, q.Id)
 		if s.seen.add(q.Id) && q.Frame != nil {
 			s.accept(q.Frame)
@@ -674,12 +894,23 @@ func (s *session) accept(f *requestFrame) {
 	}
 }
 
+// keep reports whether a pending frame of a canceled request must still be
+// delivered, the same frames dropped lets through.
+func keep(f *responseFrame) bool {
+	return f.GetControl() != nil || terminal(f)
+}
+
 // cancel stops a request and discards its undelivered results. The request
 // is remembered so a late or repeated delivery does not start it again.
 func (s *session) cancel(id string) {
 	s.canceled.add(id)
 	s.requests.add(id)
-	s.pending = slices.DeleteFunc(s.pending, func(r *responseFrame) bool { return r.RequestId == id })
+	s.pending = slices.DeleteFunc(s.pending, func(r *responseFrame) bool { return r.RequestId == id && !keep(r) })
+	for i, r := range s.pending {
+		if r.RequestId == id {
+			s.pending[i] = canceledFile(r)
+		}
+	}
 	s.backlog = slices.DeleteFunc(s.backlog, func(queued string) bool { return queued == id })
 	t := s.tasks[id]
 	switch {
@@ -692,7 +923,8 @@ func (s *session) cancel(id string) {
 	}
 }
 
-// shutdown cancels all work and flushes results within shutdownGrace.
+// shutdown cancels all work and flushes results within shutdownGrace, keeping
+// finalFlushGrace of it for the final submit even if workers are slow.
 func (s *session) shutdown() {
 	s.stopWork()
 	if s.watchCancel != nil {
@@ -706,26 +938,37 @@ func (s *session) shutdown() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	if s.awaitWorkers(ctx) {
-		s.drainReplies()
-		if err := s.submit(ctx); err != nil {
-			log.Printf("final submit: %v", err)
-		}
+	workers, stopWorkers := context.WithTimeout(ctx, shutdownGrace-finalFlushGrace)
+	defer stopWorkers()
+	if !s.awaitWorkers(workers) {
+		log.Printf("shutdown: %d requests still running", s.active)
+	}
+	if s.submitting {
+		// The frames of a submit still in flight must not be sent twice.
+		log.Printf("final submit: previous submit still running")
+		return
+	}
+	s.drainReplies()
+	if err := s.submit(ctx); err != nil {
+		log.Printf("final submit: %v", err)
 	}
 }
 
-// awaitWorkers collects results until all workers exit. It reports false if
-// ctx expired first.
+// awaitWorkers collects results until all workers and the submit in flight
+// finish. It reports false if ctx expired first.
 func (s *session) awaitWorkers(ctx context.Context) bool {
-	for s.active > 0 {
+	for s.active > 0 || s.submitting {
 		select {
 		case f := <-s.replies:
-			if !s.take(f) {
+			if !s.take(f) || s.submitting {
 				continue
 			}
 			if err := s.submit(ctx); err != nil {
 				log.Printf("submit: %v", err)
 			}
+		case r := <-s.submitted:
+			s.submitting = false
+			s.accepted(r.frames, r.accepted)
 		case id := <-s.done:
 			s.finish(id)
 		case <-ctx.Done():

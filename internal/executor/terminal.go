@@ -37,8 +37,6 @@ const (
 	envelopeEnd     = "\n---\n"
 	exitMarker      = "\n---\nexit_code: "
 	errorMarker     = "\n---\nerror: "
-	// Only this much of the file's head and tail is inspected.
-	envelopeWindow = 4096
 )
 
 // terminal creates the next free Root/terminals/<n>.txt output file.
@@ -74,9 +72,15 @@ func terminalHeader(cwd, command string, pid int, started time.Time) string {
 	return b.String()
 }
 
-func writeTerminalHeader(f *os.File, cwd, command string, pid int) error {
-	_, err := f.WriteString(terminalHeader(cwd, command, pid, time.Now()))
-	return err
+// writeTerminalHeader writes the header, followed by note, and returns the
+// offset of its status for appendTerminalExit. The quoted cwd and command
+// contain no newlines, so the status line is found unambiguously, however long
+// the header is.
+func writeTerminalHeader(f *os.File, cwd, command string, pid int, note string) (int64, error) {
+	header := terminalHeader(cwd, command, pid, time.Now())
+	statusAt := strings.Index(header, "\n"+statusField("running")+"\n") + 1
+	_, err := f.WriteString(header + note)
+	return int64(statusAt), err
 }
 
 // readAtMost reads up to n bytes at off; a short read at the end of the file
@@ -90,42 +94,24 @@ func readAtMost(f *os.File, n, off int64) ([]byte, error) {
 	return b[:read], nil
 }
 
-// appendTerminalExit adds the footer, unless the shell already wrote it, and
-// updates the status in the header.
-func appendTerminalExit(f *os.File, state *os.ProcessState) error {
-	end, err := f.Seek(0, io.SeekEnd)
-	if err != nil {
-		return err
-	}
-	tail, err := readAtMost(f, min(end, envelopeWindow), max(0, end-envelopeWindow))
-	if err != nil {
+// appendTerminalExit adds the footer and updates the status in the header at
+// statusAt. The footer is always written: only Go writes it, and output that
+// looks like a footer must not stand in for the real one.
+func appendTerminalExit(f *os.File, state *os.ProcessState, statusAt int64) error {
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
 		return err
 	}
 	code := exitCode(state)
-	if !bytes.Contains(tail, []byte(exitMarker)) {
-		footer := fmt.Sprintf("%s%d\nended_at: %s%s", exitMarker, code, time.Now().UTC().Format(timestampFormat), envelopeEnd)
-		if _, err := f.WriteString(footer); err != nil {
-			return err
-		}
-	}
-	head, err := readAtMost(f, envelopeWindow, 0)
-	if err != nil {
+	footer := fmt.Sprintf("%s%d\nended_at: %s%s", exitMarker, code, time.Now().UTC().Format(timestampFormat), envelopeEnd)
+	if _, err := f.WriteString(footer); err != nil {
 		return err
-	}
-	headerEnd := bytes.Index(head, []byte(envelopeEnd))
-	if headerEnd < 0 {
-		return nil
 	}
 	status := "completed"
 	if code != 0 {
 		status = "failed"
 	}
-	if i := bytes.Index(head[:headerEnd], []byte(statusField("running"))); i >= 0 {
-		if _, err := f.WriteAt([]byte(statusField(status)), int64(i)); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := f.WriteAt([]byte(statusField(status)), statusAt)
+	return err
 }
 
 // terminalMetadata parses the envelope of a terminal file, or returns nil if b
@@ -216,5 +202,7 @@ func decodeTerminalText(b []byte, hint string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(b[:start]) + body + string(b[end:]), nil
+	// The envelope is UTF-8 when written by Go, but the file may have been
+	// edited.
+	return strings.ToValidUTF8(string(b[:start]), "�") + body + strings.ToValidUTF8(string(b[end:]), "�"), nil
 }

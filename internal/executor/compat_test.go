@@ -292,11 +292,11 @@ func TestTerminalMixedEncoding(t *testing.T) {
 	}
 }
 
-func TestShellFunctionsAndAliasesPersist(t *testing.T) {
+func TestShellFunctionsPersistAliasesDoNot(t *testing.T) {
 	t.Setenv("SHELL", "/bin/bash")
 	e := setup(t)
 	collect(t, e, execFrame(`{"shellStreamArgs":{"command":"shopt -s expand_aliases; alias grok_hi='printf alias-ok'; grok_fn() { printf function-ok; }"}}`))
-	frames := collect(t, e, execFrame(`{"shellStreamArgs":{"command":"grok_hi; printf '|'; grok_fn"}}`))
+	frames := collect(t, e, execFrame(`{"shellStreamArgs":{"command":"grok_hi 2>/dev/null || printf no-alias; printf '|'; grok_fn"}}`))
 	var output strings.Builder
 	for _, m := range clientMessages(t, frames) {
 		output.WriteString(m.GetShellStream().GetStdout().GetData())
@@ -304,7 +304,7 @@ func TestShellFunctionsAndAliasesPersist(t *testing.T) {
 			t.Error(stderr)
 		}
 	}
-	if output.String() != "alias-ok|function-ok" {
+	if output.String() != "no-alias|function-ok" {
 		t.Fatal(output.String())
 	}
 }

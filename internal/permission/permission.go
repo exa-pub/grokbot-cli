@@ -44,8 +44,8 @@ const maxAnswer = 4096
 
 // Policy holds the standing permission mode and the terminal used for prompts.
 type Policy struct {
-	mu     sync.Mutex // guards Mode
-	prompt sync.Mutex // serializes terminal prompts
+	mu     sync.Mutex    // guards Mode and prompt
+	prompt chan struct{} // one-slot semaphore serializing terminal prompts
 	Mode   string
 	In     *os.File
 	Out    io.Writer
@@ -89,8 +89,15 @@ func (p *Policy) Allow(ctx context.Context, action string, server, approved bool
 	if p.In == nil || !term.IsTerminal(int(p.In.Fd())) {
 		return ErrRefused
 	}
-	p.prompt.Lock()
-	defer p.prompt.Unlock()
+	// Wait for the terminal without ignoring cancellation, so a queued request
+	// canceled by the server does not hold its worker slot.
+	slot := p.promptSlot()
+	select {
+	case slot <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-slot }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -101,6 +108,11 @@ func (p *Policy) Allow(ctx context.Context, action string, server, approved bool
 	out := p.Out
 	if out == nil {
 		out = os.Stderr
+	}
+	// Discard keystrokes typed before the prompt appeared so they cannot
+	// answer a question the user has not seen.
+	if err := flushInput(p.In); err != nil {
+		return err
 	}
 	fmt.Fprintf(out, "%s? [y/N/a] ", action)
 	answer, err := p.readLine(ctx)
@@ -116,6 +128,27 @@ func (p *Policy) Allow(ctx context.Context, action string, server, approved bool
 		return nil
 	}
 	return ErrRefused
+}
+
+func (p *Policy) promptSlot() chan struct{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.prompt == nil {
+		p.prompt = make(chan struct{}, 1)
+	}
+	return p.prompt
+}
+
+// flushInput discards pending terminal input; it is a no-op for non-terminals.
+func flushInput(f *os.File) error {
+	fd := int(f.Fd())
+	if !term.IsTerminal(fd) {
+		return nil
+	}
+	if err := unix.IoctlSetInt(fd, unix.TCFLSH, unix.TCIFLUSH); err != nil {
+		return fmt.Errorf("discard terminal input: %w", err)
+	}
+	return nil
 }
 
 // readLine polls canonical terminal input so cancellation does not strand a

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	aiserverv1 "github.com/exa-pub/grokbot-cli/internal/gen/aiserver/v1"
 )
@@ -143,5 +144,66 @@ func TestDiscoveryReadsLargeClaudeConfig(t *testing.T) {
 	json.Unmarshal(b, &r)
 	if len(r.Items) != 1 || r.Items[0].Title != "big" {
 		t.Fatal(string(b))
+	}
+}
+
+// A repeated request keeps its latest time.
+func TestDiscoveryDedupKeepsNewest(t *testing.T) {
+	e := discoverySetup(t)
+	put(t, filepath.Join(e.CodexHome, "history.jsonl"), `{"text":"same","ts":1700000000}`+"\n"+`{"text":"same","ts":1700000100}`+"\n")
+	b, err := e.discover(context.Background(), "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r discoveryResult
+	json.Unmarshal(b, &r)
+	if len(r.Items) != 1 || r.Items[0].OccurredAtMS != 1700000100000 {
+		t.Fatal(string(b))
+	}
+}
+
+// A session log removed after its directory was read is skipped.
+func TestDiscoverySessionRemovedWhileCounting(t *testing.T) {
+	dir := t.TempDir()
+	put(t, filepath.Join(dir, "a.jsonl"), "{}")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(filepath.Join(dir, "a.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	d := &discoverer{}
+	if err = d.countSession(entries[0]); err != nil || d.sessionFiles != 0 {
+		t.Fatal(err, d.sessionFiles)
+	}
+}
+
+func TestDiscoveryRedactsMoreSecrets(t *testing.T) {
+	for _, secret := range []string{
+		"sk_live_" + strings.Repeat("a1", 12),
+		"rk_test_" + strings.Repeat("b2", 12),
+		"glpat-" + strings.Repeat("c3", 10),
+		"hf_" + strings.Repeat("d4", 17),
+		"npm_" + strings.Repeat("e5", 18),
+		"Authorization: Basic dXNlcjpwYXNzd29yZA==",
+		"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		`aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEYX"`,
+	} {
+		title := discoveryTitle("use " + secret + " now")
+		if !strings.Contains(title, "[redacted]") || strings.Contains(title, "EXAMPLE") || strings.Contains(title, secret[len(secret)-6:]) {
+			t.Errorf("%q -> %q", secret, title)
+		}
+	}
+	if title := discoveryTitle("basic configuration of /usr/local/bin/tool"); title != "basic configuration of [path]" {
+		t.Error(title)
+	}
+}
+
+// Shortening a title does not split a surrogate pair.
+func TestDiscoveryTitleKeepsSurrogatePairs(t *testing.T) {
+	title := discoveryTitle(strings.Repeat("x", maxTitleUnits-2) + "\U0001F30D tail")
+	if strings.ContainsRune(title, utf8.RuneError) || !strings.HasSuffix(title, "x…") {
+		t.Fatalf("%q", title)
 	}
 }

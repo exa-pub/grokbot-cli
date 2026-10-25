@@ -2,15 +2,19 @@ package client
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
 	"context"
 	"encoding/binary"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/andybalholm/brotli"
@@ -164,8 +168,7 @@ func TestPrivacyLookupCacheAndFallback(t *testing.T) {
 	}))
 	defer server.Close()
 	privacy := &Privacy{}
-	httpClient := &http.Client{Transport: Transport{Base: http.DefaultTransport, Privacy: privacy}}
-	privacy.Client = rpc.NewDashboardServiceClient(httpClient, server.URL)
+	privacy.Client = rpc.NewDashboardServiceClient(PrivacyHTTP(Transport{Base: http.DefaultTransport, Privacy: privacy}), server.URL)
 	for range 2 {
 		if privacy.Ghost(context.Background()) != "false" {
 			t.Fatal("privacy mode ignored")
@@ -210,4 +213,117 @@ func TestAuthRESTCompression(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrivacyLookupRedirectDoesNotDeadlock(t *testing.T) {
+	var lookups atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/GetUserPrivacyMode") {
+			lookups.Add(1)
+			http.Redirect(w, r, r.URL.Path, http.StatusTemporaryRedirect)
+			return
+		}
+		if r.Header.Get("X-Ghost-Mode") != "true" {
+			t.Error("redirected lookup did not fail closed")
+		}
+		w.Header().Set("Content-Type", "application/proto")
+		b, _ := proto.Marshal(&aiserverv1.GetMeResponse{})
+		w.Write(b)
+	}))
+	defer server.Close()
+	privacy := &Privacy{}
+	transport := Transport{Base: http.DefaultTransport, Privacy: privacy}
+	privacy.Client = rpc.NewDashboardServiceClient(PrivacyHTTP(transport), server.URL)
+	dashboard := rpc.NewDashboardServiceClient(&http.Client{Transport: transport}, server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := dashboard.GetMe(ctx, connect.NewRequest(&aiserverv1.GetMeRequest{})); err != nil {
+		t.Fatal(err)
+	}
+	if lookups.Load() != 1 {
+		t.Fatal("redirect followed", lookups.Load())
+	}
+}
+
+func TestPrivacyLookupDoesNotBlockOtherCallers(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		w.Header().Set("Content-Type", "application/proto")
+		b, _ := proto.Marshal(&aiserverv1.GetUserPrivacyModeResponse{PrivacyMode: aiserverv1.PrivacyMode_PRIVACY_MODE_USAGE_DATA_TRAINING_ALLOWED})
+		w.Write(b)
+	}))
+	defer server.Close()
+	privacy := &Privacy{}
+	privacy.Client = rpc.NewDashboardServiceClient(PrivacyHTTP(Transport{Base: http.DefaultTransport}), server.URL)
+	done := make(chan string)
+	go func() { done <- privacy.Ghost(context.Background()) }()
+	for {
+		privacy.mu.Lock()
+		inflight := privacy.inflight
+		privacy.mu.Unlock()
+		if inflight {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if privacy.Ghost(context.Background()) != "true" {
+		t.Fatal("concurrent caller not private")
+	}
+	close(release)
+	if <-done != "false" || privacy.Ghost(context.Background()) != "false" {
+		t.Fatal("lookup result lost")
+	}
+}
+
+func TestAuthRESTEmptyCompressedBody(t *testing.T) {
+	for _, kind := range []string{"gzip", "br", "deflate"} {
+		t.Run(kind, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Encoding", kind)
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer server.Close()
+			client := &http.Client{Transport: Transport{Base: http.DefaultTransport, Profile: AuthREST}}
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+			r, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Body.Close()
+			if b, err := io.ReadAll(r.Body); err != nil || len(b) != 0 || r.StatusCode != http.StatusNotFound {
+				t.Fatal(r.StatusCode, b, err)
+			}
+		})
+	}
+}
+
+func TestInflateRawDeflateLookingLikeZlib(t *testing.T) {
+	// Find a raw DEFLATE stream whose first two bytes pass the multiple-of-31
+	// check but do not name the deflate method.
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 10000 {
+		payload := make([]byte, 1+rng.IntN(64))
+		for i := range payload {
+			payload[i] = byte('a' + rng.IntN(4))
+		}
+		var buf bytes.Buffer
+		w, _ := flate.NewWriter(&buf, flate.BestCompression)
+		w.Write(payload)
+		w.Close()
+		b := buf.Bytes()
+		if (uint16(b[0])<<8|uint16(b[1]))%31 != 0 || b[0]&0x0f == 8 {
+			continue
+		}
+		r, err := inflate(bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := io.ReadAll(r)
+		if err != nil || !bytes.Equal(got, payload) {
+			t.Fatal(string(got), err)
+		}
+		return
+	}
+	t.Skip("no ambiguous raw DEFLATE stream found")
 }
