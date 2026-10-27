@@ -91,7 +91,9 @@ func (s *Store) Claim(name string, self Holder) (release func(), err error) {
 // Probe reports the holder of the instance lock name; held is false if no
 // process holds it. Probe takes the lock for a moment to find out.
 func (s *Store) Probe(name string) (h Holder, held bool, err error) {
-	f, err := os.Open(s.instancePath(name))
+	// Opened for writing like in Claim: NFS emulates flock with POSIX locks,
+	// and an exclusive one needs a writable descriptor.
+	f, err := os.OpenFile(s.instancePath(name), os.O_RDWR, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return Holder{}, false, nil
 	}

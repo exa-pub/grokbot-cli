@@ -146,7 +146,11 @@ func (m *Manager) Installed() ([]string, error) {
 
 // Active reports whether the tunnel service is running or starting.
 func (m *Manager) Active(ctx context.Context) bool {
-	out, _ := m.systemctl(ctx, "is-active", TunnelUnit) //nolint:errcheck // inactive units exit non-zero
+	return m.active(ctx, TunnelUnit)
+}
+
+func (m *Manager) active(ctx context.Context, unit string) bool {
+	out, _ := m.systemctl(ctx, "is-active", unit) //nolint:errcheck // inactive units exit non-zero
 	state := strings.TrimSpace(string(out))
 	return state == "active" || state == "activating" || state == "reloading"
 }

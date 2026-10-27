@@ -29,7 +29,7 @@ Environment="PATH=/home/u/.local/bin:/usr/bin"
 Environment="SAND_BACKEND_URL=https://x.invalid/%%41"
 Restart=on-failure
 RestartSec=10s
-RestartPreventExitStatus=3
+RestartPreventExitStatus=78
 
 [Install]
 WantedBy=default.target
@@ -51,7 +51,7 @@ User=root
 ExecStart=/usr/local/bin/grokbot-tunnel connect --permission ask
 Restart=on-failure
 RestartSec=10s
-RestartPreventExitStatus=3
+RestartPreventExitStatus=78
 
 [Install]
 WantedBy=multi-user.target
@@ -203,16 +203,22 @@ func TestUninstall(t *testing.T) {
 		t.Fatal(removed, err, f.calls)
 	}
 	// A partial install: the tunnel and the update service, but no timer.
+	// Stopping comes last, since it ends an uninstall run inside the service.
 	os.MkdirAll(m.Scope.Dir, 0o755)
 	for _, name := range []string{TunnelUnit, UpdateUnit} {
 		os.WriteFile(filepath.Join(m.Scope.Dir, name), nil, 0o644)
 	}
+	f.replies["systemctl --user is-active grokbot-tunnel.service"] = "active\n"
+	f.replies["systemctl --user is-active grokbot-tunnel-update.service"] = "inactive\n"
 	if removed, err := m.Uninstall(context.Background()); !removed || err != nil {
 		t.Fatal(removed, err, out.String())
 	}
 	want := []string{
-		"systemctl --user disable --now grokbot-tunnel.service",
+		"systemctl --user is-active grokbot-tunnel.service",
+		"systemctl --user is-active grokbot-tunnel-update.service",
+		"systemctl --user disable grokbot-tunnel.service",
 		"systemctl --user daemon-reload",
+		"systemctl --user stop grokbot-tunnel.service",
 		"systemctl --user reset-failed grokbot-tunnel.service",
 	}
 	if !slices.Equal(f.calls, want) {

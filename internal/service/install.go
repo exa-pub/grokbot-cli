@@ -112,22 +112,26 @@ func (m *Manager) writeUnit(name, content string) error {
 	return nil
 }
 
-// Uninstall stops, disables and removes the units that exist. It reports
-// whether there were any.
+// Uninstall disables, removes and stops the units that exist. It reports
+// whether there were any. Stopping comes last: run from inside the service,
+// e.g. by the agent, it ends this process too.
 func (m *Manager) Uninstall(ctx context.Context) (bool, error) {
 	found, err := m.Installed()
 	if err != nil || len(found) == 0 {
 		return false, err
 	}
-	args := []string{"disable", "--now"}
+	var units, running []string
 	for _, name := range found {
 		// The update service has no [Install] section; its timer starts it.
 		if name != UpdateUnit {
-			args = append(args, name)
+			units = append(units, name)
+		}
+		if m.active(ctx, name) {
+			running = append(running, name)
 		}
 	}
-	if len(args) > 2 {
-		if _, err = m.systemctl(ctx, args...); err != nil {
+	if len(units) > 0 {
+		if _, err = m.systemctl(ctx, append([]string{"disable"}, units...)...); err != nil {
 			return true, err
 		}
 	}
@@ -140,6 +144,13 @@ func (m *Manager) Uninstall(ctx context.Context) (bool, error) {
 	}
 	if _, err = m.systemctl(ctx, "daemon-reload"); err != nil {
 		return true, err
+	}
+	// Units removed while running stay loaded until they stop; stopping
+	// the others would fail, since they are gone.
+	if len(running) > 0 {
+		if _, err = m.systemctl(ctx, append([]string{"stop"}, running...)...); err != nil {
+			return true, err
+		}
 	}
 	// Forget a failed state, so the unit does not linger in systemctl --failed.
 	_, _ = m.systemctl(ctx, "reset-failed", TunnelUnit) //nolint:errcheck // fails if the unit never failed

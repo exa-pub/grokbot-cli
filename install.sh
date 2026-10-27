@@ -156,12 +156,14 @@ info "Installed ${installed} to ${INSTALL_DIR}/${BINARY}"
 sctl() {
     if [ "$(id -u)" -eq 0 ]; then systemctl "$@"; else systemctl --user "$@"; fi
 }
-if command -v systemctl >/dev/null 2>&1 &&
-    sctl is-active --quiet grokbot-tunnel 2>/dev/null &&
-    sctl show --property=ExecStart --value grokbot-tunnel 2>/dev/null |
-    grep -qF "path=${INSTALL_DIR}/${BINARY} "; then
-    info "Restarting the ${BINARY} service"
-    sctl restart --no-block grokbot-tunnel || warn "could not restart the service; restart it yourself"
+if command -v systemctl >/dev/null 2>&1 && sctl is-active --quiet grokbot-tunnel 2>/dev/null; then
+    exec_start="$(sctl show --property=ExecStart --value grokbot-tunnel 2>/dev/null || true)"
+    case "$exec_start" in
+        *"path=${INSTALL_DIR}/${BINARY} "*)
+            info "Restarting the ${BINARY} service"
+            sctl restart --no-block grokbot-tunnel || warn "could not restart the service; restart it yourself"
+            ;;
+    esac
 fi
 
 # The project used to be called grokbot-cli; an old copy may still be on PATH.

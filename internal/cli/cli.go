@@ -13,6 +13,7 @@ import (
 	"github.com/exa-pub/grokbot-tunnel/internal/auth"
 	"github.com/exa-pub/grokbot-tunnel/internal/client"
 	"github.com/exa-pub/grokbot-tunnel/internal/permission"
+	"github.com/exa-pub/grokbot-tunnel/internal/service"
 )
 
 // version is the release version, set at build time with
@@ -30,12 +31,12 @@ func Execute(ctx context.Context, args []string) error {
 	return root.ExecuteContext(ctx)
 }
 
-// ExitCode returns the exit status for an error from Execute: 3 when the
-// user has to log in again, which tells systemd that restarting cannot help,
-// and 1 otherwise.
+// ExitCode returns the exit status for an error from Execute:
+// service.ExitLogin when the user has to log in again, which tells systemd
+// that restarting cannot help, and 1 otherwise.
 func ExitCode(err error) int {
 	if errors.Is(err, auth.ErrLogout) || errors.Is(err, auth.ErrNotLoggedIn) {
-		return 3
+		return service.ExitLogin
 	}
 	return 1
 }

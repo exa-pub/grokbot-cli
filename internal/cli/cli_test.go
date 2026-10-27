@@ -61,8 +61,8 @@ func TestMissingCommand(t *testing.T) {
 func TestExitCode(t *testing.T) {
 	for err, want := range map[error]int{
 		errors.New("boom"):                         1,
-		auth.ErrNotLoggedIn:                        3,
-		fmt.Errorf("register: %w", auth.ErrLogout): 3,
+		auth.ErrNotLoggedIn:                        78,
+		fmt.Errorf("register: %w", auth.ErrLogout): 78,
 	} {
 		if got := ExitCode(err); got != want {
 			t.Errorf("ExitCode(%v) = %d, want %d", err, got, want)

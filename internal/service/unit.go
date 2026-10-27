@@ -15,6 +15,10 @@ const (
 	documentation = "https://github.com/exa-pub/grokbot-tunnel"
 )
 
+// ExitLogin is the exit status of connect when the user has to log in again.
+// It is EX_CONFIG from sysexits.h, which systemd shows as "78/CONFIG".
+const ExitLogin = 78
+
 // Config describes the service to install.
 type Config struct {
 	Exe        string   // absolute path of the grokbot-tunnel binary
@@ -77,8 +81,8 @@ func tunnelUnit(s Scope, c Config) (string, error) {
 		}
 		b.WriteString("Environment=" + v + "\n")
 	}
-	// Exit status 3 means the user has to log in again; retrying cannot help.
-	b.WriteString("Restart=on-failure\nRestartSec=10s\nRestartPreventExitStatus=3\n")
+	// Retrying cannot help a user who has to log in again.
+	fmt.Fprintf(&b, "Restart=on-failure\nRestartSec=10s\nRestartPreventExitStatus=%d\n", ExitLogin)
 	b.WriteString("\n[Install]\nWantedBy=" + s.wantedBy() + "\n")
 	return b.String(), nil
 }

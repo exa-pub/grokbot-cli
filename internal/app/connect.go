@@ -68,6 +68,9 @@ func Connect(ctx context.Context, opts ConnectOptions) error {
 
 	u := e.user(identity)
 	if err = register(ctx, u.dashboard, e.machine.Label, opts.Permission); err != nil {
+		if ctx.Err() != nil {
+			return nil // stopped while starting, e.g. by systemctl stop
+		}
 		return err
 	}
 	log.Printf("root=%s permission=%s", ex.Root, opts.Permission)
