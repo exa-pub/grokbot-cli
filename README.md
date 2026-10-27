@@ -5,11 +5,16 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/exa-pub/grokbot-tunnel)](go.mod)
 [![License: MIT](https://img.shields.io/github/license/exa-pub/grokbot-tunnel)](LICENSE)
 
-grokbot-tunnel connects a Linux server to Grok Bot as a computer. The Grok Bot
-agent can then run commands and work with files on that server, the same way
-it does on a machine with the Grok Bot desktop app, but without a desktop.
+**Headless mode for Grok Bot.** grokbot-tunnel is a CLI that connects a
+headless Linux server (VPS, cloud VM, home server, container, Raspberry Pi) to
+Grok Bot as a computer. The Grok Bot agent can then run commands and work with
+files on that server, the same way it does on a machine with the Grok Bot
+desktop app, but without a desktop, GUI or browser.
 
-## Quick start
+Use it to run Grok Bots on a remote server over SSH, give the agent access to a
+build machine, or keep a headless connection to Grok Bot running under systemd.
+
+## How to connect Grok Bot to a headless server
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash
@@ -21,15 +26,17 @@ grokbot-tunnel connect --root "$HOME/projects"
    specific release: `... | bash -s v0.1.0`.
 2. `login --no-browser` prints a sign-in link that you open on any device. On a
    machine with a browser, plain `login` opens it for you. Use `--team ID` to
-   select a team.
+   select a team. This is how sign-in works on a headless server without a
+   browser.
 3. `connect` makes the server appear as a computer in Grok Bot and runs the
    agent's requests until you press Ctrl-C. Ctrl-C stops running commands;
    background commands keep running.
 
-The server needs bash (or zsh, if `$SHELL` points to it). `rg` (ripgrep) is
+Linux on x86_64 (amd64) and arm64 is supported. The server needs bash (or zsh,
+if `$SHELL` points to it). `rg` (ripgrep) is
 optional; with it, directory listings respect `.gitignore`.
 
-## Connect options
+## CLI connect options
 
 | Flag | Meaning |
 |------|---------|
