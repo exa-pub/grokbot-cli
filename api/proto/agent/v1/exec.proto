@@ -133,6 +133,7 @@ message SandboxPolicy {
   optional bool skip_statsig_defaults = 13;
   .agent.v1.SandboxPolicy.ReadBoundaryMode read_boundary = 14;
   repeated string additional_read_paths = 15;
+  optional bool allow_user_override_read_paths = 16;
 }
 message NetworkPolicy {
   enum DefaultAction {
@@ -312,4 +313,5 @@ message ReadArgs {
   optional uint32 limit = 5;
   optional string encoding_hint = 6;
   optional bool digest_only = 7;
+  optional uint32 max_chars = 8;
 }

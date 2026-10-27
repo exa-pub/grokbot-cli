@@ -421,3 +421,47 @@ func TestTerminalTextInvalidEnvelope(t *testing.T) {
 		t.Fatalf("%q %v", text, err)
 	}
 }
+
+// Commands get git's core.quotePath=false like the desktop's, once, also
+// when the saved state already carries it.
+func TestGitQuotePathForCommands(t *testing.T) {
+	eachShell(t, func(t *testing.T, home string) {
+		e := setupHome(t, home)
+		for range 2 {
+			expectStdout(t, e, `printf '%s %s %s' "$GIT_CONFIG_COUNT" "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0"`, "1 core.quotePath false")
+		}
+		if _, err := exec.LookPath("git"); err == nil {
+			expectStdout(t, e, "git config core.quotePath", "false\n")
+		}
+	})
+}
+
+func TestWithGitConfig(t *testing.T) {
+	for _, tc := range []struct{ env, want string }{
+		{"", "GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=false GIT_CONFIG_COUNT=1"},
+		{"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_KEY_1=core.quotePath GIT_CONFIG_VALUE_1=false GIT_CONFIG_COUNT=2"},
+		{"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=Core.QuotePath", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=Core.QuotePath"},
+		// A key past the count does not count; parseInt reads leading digits.
+		{"GIT_CONFIG_COUNT=0x GIT_CONFIG_KEY_0=core.quotepath", "GIT_CONFIG_COUNT=0x GIT_CONFIG_KEY_0=core.quotepath GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=false GIT_CONFIG_COUNT=1"},
+		{"GIT_CONFIG_COUNT=-1", "GIT_CONFIG_COUNT=-1 GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=false GIT_CONFIG_COUNT=1"},
+		{"GIT_CONFIG_COUNT=2abc", "GIT_CONFIG_COUNT=2abc GIT_CONFIG_KEY_2=core.quotePath GIT_CONFIG_VALUE_2=false GIT_CONFIG_COUNT=3"},
+	} {
+		if got := strings.Join(withGitConfig(strings.Fields(tc.env)), " "); got != tc.want {
+			t.Errorf("%q: %q, want %q", tc.env, got, tc.want)
+		}
+	}
+	for s, want := range map[string]int{" \t+7": 7, "": 0, "x1": 0, "-0": 0, "99999999999999999999": 0} {
+		if got := parseCount(s); got != want {
+			t.Errorf("parseCount(%q) = %d, want %d", s, got, want)
+		}
+	}
+}
+
+func TestShellPlainOutputEnv(t *testing.T) {
+	eachShell(t, func(t *testing.T, home string) {
+		t.Setenv("TERM", "xterm-256color")
+		e := setupHome(t, home)
+		expectStdout(t, e, `printf '%s %s %s %s' "$TERM" "$NO_COLOR" "$FORCE_COLOR" "$_ZO_DOCTOR"; export TERM=vt100`, "dumb 1 0 0")
+		expectStdout(t, e, `printf %s "$TERM"`, "vt100")
+	})
+}

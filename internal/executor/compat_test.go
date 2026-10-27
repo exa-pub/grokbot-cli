@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,7 +46,7 @@ func controlMessage(t *testing.T, f *aiserverv1.GrokBotUserComputerResponseFrame
 	return m
 }
 func TestReferenceRangesAndTerminalHeader(t *testing.T) {
-	b, err := os.ReadFile("../../testdata/compat/0.75.8/pure-functions.json")
+	b, err := os.ReadFile("../../testdata/compat/0.77.0/pure-functions.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +77,101 @@ func TestReferenceRangesAndTerminalHeader(t *testing.T) {
 			t.Fatalf("range: got %v want %+v", result, tc.Result)
 		}
 	}
+	readStreamingReference(t, e, b)
 	started, _ := time.Parse(time.RFC3339, "2026-01-01T00:00:00.000Z")
 	if got := terminalHeader("/workspace", "printf hello", 42, started); got != fixture.TerminalHeader {
 		t.Fatalf("header mismatch: %q vs %q", got, fixture.TerminalHeader)
 	}
 }
+
+// referenceRuns is a long text stored as runs of one character.
+type referenceRuns []struct {
+	Char  string
+	Count int
+}
+
+func (r referenceRuns) String() string {
+	var b strings.Builder
+	for _, run := range r {
+		b.WriteString(strings.Repeat(run.Char, run.Count))
+	}
+	return b.String()
+}
+
+// readStreamingReference reads the texts of the desktop's streaming reader
+// cases and the invalid UTF-8 cases through the executor.
+func readStreamingReference(t *testing.T, e *Executor, fixtureJSON []byte) {
+	t.Helper()
+	var fixture struct {
+		Streaming []struct {
+			Text     string
+			TextRuns referenceRuns
+			Args     json.RawMessage
+			Result   struct {
+				Content      string
+				ContentRuns  referenceRuns
+				TotalLines   int32
+				Truncated    bool
+				RangeApplied bool
+			}
+		}
+		Fallback []struct {
+			Hex        string
+			MostlyUtf8 bool
+			Lossy      string
+		}
+	}
+	if err := json.Unmarshal(fixtureJSON, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	read := func(text string, args json.RawMessage) *agentv1.ReadSuccess {
+		t.Helper()
+		os.WriteFile(filepath.Join(e.Root, "stream"), []byte(text), 0600)
+		x := &agentv1.ReadArgs{}
+		if err := protojson.Unmarshal(args, x); err != nil {
+			t.Fatal(err)
+		}
+		x.Path = "stream"
+		msg := &agentv1.ExecServerMessage{Id: 901, Message: &agentv1.ExecServerMessage_ReadArgs{ReadArgs: x}}
+		b, _ := protojson.Marshal(msg)
+		return clientMessages(t, collect(t, e, execFrame(string(b))))[0].GetReadResult().GetSuccess()
+	}
+	if len(fixture.Streaming) == 0 || len(fixture.Fallback) == 0 {
+		t.Fatal("fixture without streaming or fallback cases")
+	}
+	for _, tc := range fixture.Streaming {
+		text, want := tc.Text, tc.Result.Content
+		if tc.TextRuns != nil {
+			text, want = tc.TextRuns.String(), tc.Result.ContentRuns.String()
+		}
+		got := read(text, tc.Args)
+		if got == nil || got.GetContent() != want || got.TotalLines != tc.Result.TotalLines || got.Truncated != tc.Result.Truncated || got.RangeApplied != tc.Result.RangeApplied {
+			t.Errorf("streaming %.40q %s: got %d units truncated=%v lines=%d range=%v, want %d units %+v",
+				text, tc.Args, utf16Len(got.GetContent()), got.GetTruncated(), got.GetTotalLines(), got.GetRangeApplied(), utf16Len(want), tc.Result.Truncated)
+		}
+	}
+	for _, tc := range fixture.Fallback {
+		raw, err := hex.DecodeString(tc.Hex)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := lossyUTF8(raw); got != tc.Lossy || mostlyUTF8(got) != tc.MostlyUtf8 {
+			t.Errorf("fallback %s: lossy %q mostly=%v, want %q %v", tc.Hex, got, mostlyUTF8(got), tc.Lossy, tc.MostlyUtf8)
+		}
+		want := tc.Lossy
+		if !tc.MostlyUtf8 {
+			out := make([]rune, len(raw))
+			for i, c := range raw {
+				out[i] = rune(c) // Latin-1
+			}
+			want = string(out)
+		}
+		if got := read(string(raw), json.RawMessage(`{}`)); got.GetContent() != want {
+			t.Errorf("fallback read %s: %q, want %q", tc.Hex, got.GetContent(), want)
+		}
+	}
+}
+
 func TestLifecycleBranches(t *testing.T) {
 	e := setup(t)
 	os.WriteFile(filepath.Join(e.Root, "data"), []byte("ok"), 0600)

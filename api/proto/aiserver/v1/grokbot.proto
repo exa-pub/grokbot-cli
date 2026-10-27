@@ -22,6 +22,7 @@ message GetMeResponse {
   optional bool has_active_mobile_session = 18;
   optional string public_user_id = 19;
   optional bool scm_only_restricted = 20;
+  optional bool email_is_synthetic = 21;
 }
 message GetMeRequest {
   optional int32 team_id = 1;
@@ -147,6 +148,8 @@ message GrokBotUserComputerMessagesOp {
   string op_json = 1;
   optional string approval_id = 2;
   optional string send_key = 3;
+  optional bool draft_card = 4;
+  bool authorized_by_approval = 5;
 }
 message GrokBotUserComputerCancel {
 }
@@ -197,6 +200,7 @@ message WatchGrokBotUserComputerRequestsRequest {
   string machine_id = 1;
   string credential = 2;
   .aiserver.v1.GrokBotUserComputerHello hello = 3;
+  string presence_token = 4;
 }
 message GrokBotUserComputerHello {
   string label = 1;
@@ -224,6 +228,14 @@ message GrokBotUserComputerLocalTool {
   string tool_id = 1;
   string state = 2;
 }
+message WithdrawGrokBotUserComputerPresenceResponse {
+  bool withdrawn = 1;
+}
+message WithdrawGrokBotUserComputerPresenceRequest {
+  string machine_id = 1;
+  string credential = 2;
+  string presence_token = 3;
+}
 message IssueGrokBotUserComputerCredentialResponse {
   string credential = 1;
   int64 expires_at_ms = 2;
@@ -238,6 +250,7 @@ rpc IssueGrokBotUserComputerCredential(IssueGrokBotUserComputerCredentialRequest
 rpc WatchGrokBotUserComputerRequests(WatchGrokBotUserComputerRequestsRequest) returns (stream WatchGrokBotUserComputerRequestsEvent);
 rpc PollGrokBotUserComputerRequests(PollGrokBotUserComputerRequestsRequest) returns (PollGrokBotUserComputerRequestsResponse);
 rpc SubmitGrokBotUserComputerResponses(SubmitGrokBotUserComputerResponsesRequest) returns (SubmitGrokBotUserComputerResponsesResponse);
+rpc WithdrawGrokBotUserComputerPresence(WithdrawGrokBotUserComputerPresenceRequest) returns (WithdrawGrokBotUserComputerPresenceResponse);
 }
 
 service DashboardService {

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +28,8 @@ type fakeCloud struct {
 	polls, issues int
 	acked         bool
 	submitted     []*aiserverv1.GrokBotUserComputerResponseFrame
+	presences     []string // presence tokens of the watches
+	withdrawn     *aiserverv1.WithdrawGrokBotUserComputerPresenceRequest
 	finished      chan struct{}
 	once          sync.Once
 	t             *testing.T
@@ -45,9 +48,12 @@ func (s *fakeCloud) WatchGrokBotUserComputerRequests(ctx context.Context, r *con
 	if r.Header().Get("Authorization") != "" {
 		s.t.Error("credential channel used bearer")
 	}
-	if !r.Msg.Hello.Capabilities.GetAiToolSetup() || r.Msg.Hello.Capabilities.GetMessagesOp() || r.Msg.Hello.Capabilities.GetMessagesOpGeneration() != 2 || r.Msg.Hello.Capabilities.Shell != nil {
+	if !r.Msg.Hello.Capabilities.GetAiToolSetup() || r.Msg.Hello.Capabilities.GetMessagesOp() || r.Msg.Hello.Capabilities.GetMessagesOpGeneration() != 4 || r.Msg.Hello.Capabilities.Shell != nil {
 		s.t.Error("unsupported capability advertised")
 	}
+	s.mu.Lock()
+	s.presences = append(s.presences, r.Msg.PresenceToken)
+	s.mu.Unlock()
 	if err := stream.Send(&aiserverv1.WatchGrokBotUserComputerRequestsEvent{Event: &aiserverv1.WatchGrokBotUserComputerRequestsEvent_Connected{Connected: &aiserverv1.WatchGrokBotUserComputerConnected{}}}); err != nil {
 		return err
 	}
@@ -90,6 +96,15 @@ func (s *fakeCloud) SubmitGrokBotUserComputerResponses(ctx context.Context, r *c
 		}
 	}
 	return connect.NewResponse(&aiserverv1.SubmitGrokBotUserComputerResponsesResponse{AcceptedCount: uint32(len(r.Msg.Frames))}), nil
+}
+func (s *fakeCloud) WithdrawGrokBotUserComputerPresence(ctx context.Context, r *connect.Request[aiserverv1.WithdrawGrokBotUserComputerPresenceRequest]) (*connect.Response[aiserverv1.WithdrawGrokBotUserComputerPresenceResponse], error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r.Header().Get("Authorization") != "" {
+		s.t.Error("withdraw used bearer")
+	}
+	s.withdrawn = r.Msg
+	return connect.NewResponse(&aiserverv1.WithdrawGrokBotUserComputerPresenceResponse{Withdrawn: true}), nil
 }
 func TestQueueAckDedupCredentialRecoveryAndShutdown(t *testing.T) {
 	cloud := &fakeCloud{t: t, finished: make(chan struct{})}
@@ -146,5 +161,14 @@ func TestQueueAckDedupCredentialRecoveryAndShutdown(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("duplicate result: %d", count)
+	}
+	// Every watch of the session carries its presence token, which the
+	// shutdown withdraws with the current credential.
+	token := cloud.presences[0]
+	if len(token) != 36 || slices.ContainsFunc(cloud.presences, func(p string) bool { return p != token }) {
+		t.Fatalf("presence tokens %q", cloud.presences)
+	}
+	if w := cloud.withdrawn; w == nil || w.PresenceToken != token || w.MachineId != "m" || w.Credential != "2" {
+		t.Fatalf("withdrawn %v", w)
 	}
 }

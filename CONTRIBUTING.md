@@ -9,7 +9,7 @@ To connect to a different server, set `SAND_BACKEND_URL` (API address) and
 Shell tests run against bash and, when found, zsh: set `GROK_TEST_ZSH` to a zsh
 binary or put zsh on `PATH`.
 
-`testdata/compat/0.75.8/` holds reference data from the desktop client;
+`testdata/compat/0.77.0/` holds reference data from the desktop client;
 `scripts/compat-reference.mjs` regenerates it. `scripts/extract-proto.py`
 reconstructs `.proto` schemas from the client's bundle without running it;
 `api/proto/` is a subset of its output.

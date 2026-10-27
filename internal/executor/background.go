@@ -48,6 +48,7 @@ func (e *Executor) background(ctx context.Context, cmd, path string) (_ *agentv1
 	defer closeLogged(command)
 	sh := userShell()
 	c := shellCommand(sh, st, cwd, sh.args("-c", sh.backgroundScript(), "grok-background")...)
+	c.Env = withGitConfig(c.Env)
 	c.ExtraFiles = []*os.File{replay, gate, command}
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	c.Stdout = f

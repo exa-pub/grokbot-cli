@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
 	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
 	"github.com/exa-pub/grokbot-tunnel/internal/permission"
 )
@@ -492,4 +493,48 @@ func TestUploadThroughDanglingSymlink(t *testing.T) {
 func TestShellOwnSession(t *testing.T) {
 	e := setup(t)
 	expectStdout(t, e, `awk '{print ($6 == $1) ? "leader" : "member"}' /proc/$$/stat`, "leader\n")
+}
+
+// A terminal file read whole keeps two characters more than max_chars, like
+// the desktop's terminal reader; ranges are not limited.
+func TestTerminalReadMaxChars(t *testing.T) {
+	e := setup(t)
+	if err := e.Files.MkdirAll(terminalsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	text := terminalHeader("/w", "x", 1, time.Unix(0, 0)) + "0123456789\n"
+	if err := os.WriteFile(filepath.Join(e.Root, terminalsDir, "1.txt"), []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := func(args string) *agentv1.ReadSuccess {
+		t.Helper()
+		frames := collect(t, e, execFrame(`{"id":1,"readArgs":{"path":"`+terminalsDir+`/1.txt",`+args+`}}`))
+		return clientMessages(t, frames)[0].GetReadResult().GetSuccess()
+	}
+	if r := read(`"maxChars":5`); r.GetContent() != text[:7] || !r.Truncated {
+		t.Fatalf("whole: %q %v", r.GetContent(), r.Truncated)
+	}
+	if r := read(`"maxChars":5,"offset":1`); r.GetContent() != text || r.Truncated {
+		t.Fatalf("range: %q %v", r.GetContent(), r.Truncated)
+	}
+	if r := read(`"maxChars":1000`); r.GetContent() != text || r.Truncated {
+		t.Fatalf("short: %q %v", r.GetContent(), r.Truncated)
+	}
+}
+
+// Invalid output bytes become one U+FFFD per maximal invalid subsequence, as
+// Node's decoder writes them.
+func TestShellOutputReplacement(t *testing.T) {
+	e := setup(t)
+	expectStdout(t, e, `printf 'a\377\376b\342\202c'`, "a��b�c")
+}
+
+// Like the desktop, a stream stops reaching the agent after 1 MiB; the
+// command still runs to its end.
+func TestShellOutputCap(t *testing.T) {
+	e := setup(t)
+	r := runShell(t, e, `head -c 2000000 /dev/zero | tr '\0' a; echo done >&2`)
+	if len(r.stdout) > maxStreamOutput || len(r.stdout) == 0 || strings.Trim(r.stdout, "a") != "" || r.stderr != "done\n" || r.exit.Code != 0 {
+		t.Fatalf("stdout %d bytes, stderr %q, exit %v", len(r.stdout), r.stderr, r.exit)
+	}
 }

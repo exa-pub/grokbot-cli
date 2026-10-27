@@ -3,7 +3,6 @@ package executor
 import (
 	"log"
 	"os"
-	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -51,12 +50,18 @@ func (o *shellOutput) sendErr() error {
 	return o.err
 }
 
+// maxStreamOutput is how many bytes of a stream the desktop forwards; the
+// agent gets nothing of a stream after the write that would exceed it.
+const maxStreamOutput = 1 << 20
+
 // streamWriter forwards one stream, holding back a trailing incomplete UTF-8
 // sequence until the rest of it arrives.
 type streamWriter struct {
 	out     *shellOutput
 	event   func(string) *agentv1.ShellStream // stdoutEvent or stderrEvent
 	partial []byte
+	sent    int  // bytes of the stream forwarded so far
+	trimmed bool // maxStreamOutput was reached
 }
 
 // Write never fails: the process must keep running even if the agent or the
@@ -74,15 +79,25 @@ func (w *streamWriter) Write(b []byte) (int, error) {
 			o.file = nil
 		}
 	}
-	if o.detached || o.err != nil {
+	if o.detached || o.err != nil || w.trimmed {
 		return len(b), nil
 	}
+	if w.sent+len(b) > maxStreamOutput {
+		// The held-back bytes still go out, as the desktop flushes its decoder.
+		w.trimmed = true
+		if len(w.partial) > 0 {
+			o.err = o.emit(w.event, lossyUTF8(w.partial))
+		}
+		w.partial = nil
+		return len(b), nil
+	}
+	w.sent += len(b)
 	data := append(w.partial, b...)
 	n := completeLen(data)
 	w.partial = append([]byte(nil), data[n:]...)
 	for data = data[:n]; len(data) > 0; {
 		n := chunkLen(data)
-		if err := o.emit(w.event, strings.ToValidUTF8(string(data[:n]), "�")); err != nil {
+		if err := o.emit(w.event, lossyUTF8(data[:n])); err != nil {
 			o.err = err
 			break
 		}
@@ -96,7 +111,7 @@ func (w *streamWriter) flush() {
 	w.out.mu.Lock()
 	defer w.out.mu.Unlock()
 	if len(w.partial) > 0 && !w.out.detached && !w.out.finished && w.out.err == nil {
-		w.out.err = w.out.emit(w.event, strings.ToValidUTF8(string(w.partial), "�"))
+		w.out.err = w.out.emit(w.event, lossyUTF8(w.partial))
 	}
 	w.partial = nil
 }

@@ -3,6 +3,7 @@ package computer
 
 import (
 	"context"
+	crand "crypto/rand"
 	"errors"
 	"fmt"
 	"log"
@@ -50,6 +51,9 @@ const (
 	pollInterval      = 30 * time.Second
 	keepAliveInterval = 2 * time.Second
 	shutdownGrace     = 8 * time.Second
+	// The presence is withdrawn on shutdown within this time, as the desktop's
+	// user-computer-presence-withdraw deadline.
+	withdrawTimeout = 750 * time.Millisecond
 	// Part of shutdownGrace kept for the final submit after waiting for workers.
 	finalFlushGrace = 2 * time.Second
 
@@ -136,7 +140,7 @@ func (pv *Provider) hello(c config.Computer, standing string) *aiserverv1.GrokBo
 		standing = ""
 	}
 	setup := true
-	generation := int32(2)
+	generation := int32(4)
 	return &aiserverv1.GrokBotUserComputerHello{
 		Label:               pv.Machine.Label,
 		LocalRoot:           pv.Executor.Root,
@@ -214,6 +218,10 @@ func (d *dedup) add(id string) bool {
 type session struct {
 	pv *Provider
 
+	// presence identifies this session's watch streams to the server, which
+	// forgets the computer's presence when it is withdrawn.
+	presence string
+
 	// work is canceled on shutdown and parents watch and task contexts.
 	work     context.Context
 	stopWork context.CancelFunc
@@ -274,6 +282,7 @@ type session struct {
 func newSession(ctx context.Context, pv *Provider) *session {
 	s := &session{
 		pv:          pv,
+		presence:    newUUID(),
 		replies:     make(chan *responseFrame, submitBatch),
 		done:        make(chan string, maxActive),
 		events:      make(chan watched, 16),
@@ -417,7 +426,9 @@ func (s *session) run(ctx context.Context) error {
 		var err error
 		select {
 		case <-ctx.Done():
+			withdrawn := s.withdrawPresence()
 			s.shutdown()
+			<-withdrawn
 			return nil
 		case f := <-s.acceptReplies():
 			s.onReply(f)
@@ -714,9 +725,10 @@ func (s *session) startWatch() {
 	s.watchConnected = false
 	s.lastEvent = s.now()
 	req := &aiserverv1.WatchGrokBotUserComputerRequestsRequest{
-		MachineId:  s.pv.Machine.MachineID,
-		Credential: s.credential.Credential,
-		Hello:      s.pv.hello(s.credential, s.lastStanding),
+		MachineId:     s.pv.Machine.MachineID,
+		Credential:    s.credential.Credential,
+		Hello:         s.pv.hello(s.credential, s.lastStanding),
+		PresenceToken: s.presence,
 	}
 	go func() {
 		err := s.watch(ctx, req, gen)
@@ -1025,6 +1037,32 @@ func (s *session) cancel(id string) {
 	}
 }
 
+// withdrawPresence stops the watch and tells the server in the background
+// that this session is gone, so the computer goes offline at once instead of
+// when the stream times out. The channel is closed once the call is done.
+func (s *session) withdrawPresence() <-chan struct{} {
+	done := make(chan struct{})
+	s.stopWatch()
+	if s.credential.Credential == "" {
+		close(done)
+		return done
+	}
+	req := &aiserverv1.WithdrawGrokBotUserComputerPresenceRequest{
+		MachineId:     s.pv.Machine.MachineID,
+		Credential:    s.credential.Credential,
+		PresenceToken: s.presence,
+	}
+	go func() {
+		defer close(done)
+		ctx, cancel := context.WithTimeout(context.Background(), withdrawTimeout)
+		defer cancel()
+		if _, err := s.pv.Channel.WithdrawGrokBotUserComputerPresence(ctx, connect.NewRequest(req)); err != nil {
+			log.Printf("withdraw presence: %v", err)
+		}
+	}()
+	return done
+}
+
 // shutdown cancels all work and flushes results within shutdownGrace, keeping
 // finalFlushGrace of it for the final submit even if workers are slow.
 func (s *session) shutdown() {
@@ -1090,6 +1128,16 @@ func (s *session) drainReplies() {
 			return
 		}
 	}
+}
+
+// newUUID returns a random version 4 UUID, the form of the desktop's
+// presence tokens.
+func newUUID() string {
+	var b [16]byte
+	_, _ = crand.Read(b[:]) // never fails
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func (pv *Provider) now() time.Time {

@@ -37,10 +37,15 @@ const (
 	waitDelay = time.Second
 )
 
-var (
-	errFileTooLarge = errors.New("file exceeds 100 MiB")
-	errOutsideRoot  = errors.New("path is outside the allowed local-exec root")
-)
+var errOutsideRoot = errors.New("path is outside the allowed local-exec root")
+
+// fileTooLarge refuses a file of size bytes in the desktop's words.
+func fileTooLarge(size int64) error {
+	mib := func(n int64) string { return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20)) }
+	//nolint:staticcheck // desktop text
+	return fmt.Errorf("File is %s, which exceeds Grok Bot's %s limit for reading or transferring a single file over local-exec. "+
+		"Read a slice with offset/limit, or use a shell command (grep, head, tail) to extract just what you need.", mib(size), mib(MaxFile))
+}
 
 // Sink delivers response frames to the server.
 type Sink func(*aiserverv1.GrokBotUserComputerResponseFrame) error

@@ -17,7 +17,7 @@ import (
 )
 
 // Version is the Sand desktop version whose protocol this client speaks.
-const Version = "0.75.8"
+const Version = "0.77.0"
 
 // AuthUserAgent is the bundled Undici default: n5t selects "undici" when
 // neither __UNDICI_IS_NODE__ nor esbuildDetection is defined.

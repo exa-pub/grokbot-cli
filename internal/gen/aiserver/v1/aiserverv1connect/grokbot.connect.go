@@ -47,6 +47,9 @@ const (
 	// GrokBotServiceSubmitGrokBotUserComputerResponsesProcedure is the fully-qualified name of the
 	// GrokBotService's SubmitGrokBotUserComputerResponses RPC.
 	GrokBotServiceSubmitGrokBotUserComputerResponsesProcedure = "/aiserver.v1.GrokBotService/SubmitGrokBotUserComputerResponses"
+	// GrokBotServiceWithdrawGrokBotUserComputerPresenceProcedure is the fully-qualified name of the
+	// GrokBotService's WithdrawGrokBotUserComputerPresence RPC.
+	GrokBotServiceWithdrawGrokBotUserComputerPresenceProcedure = "/aiserver.v1.GrokBotService/WithdrawGrokBotUserComputerPresence"
 	// DashboardServiceGetUserPrivacyModeProcedure is the fully-qualified name of the DashboardService's
 	// GetUserPrivacyMode RPC.
 	DashboardServiceGetUserPrivacyModeProcedure = "/aiserver.v1.DashboardService/GetUserPrivacyMode"
@@ -63,6 +66,7 @@ type GrokBotServiceClient interface {
 	WatchGrokBotUserComputerRequests(context.Context, *connect.Request[v1.WatchGrokBotUserComputerRequestsRequest]) (*connect.ServerStreamForClient[v1.WatchGrokBotUserComputerRequestsEvent], error)
 	PollGrokBotUserComputerRequests(context.Context, *connect.Request[v1.PollGrokBotUserComputerRequestsRequest]) (*connect.Response[v1.PollGrokBotUserComputerRequestsResponse], error)
 	SubmitGrokBotUserComputerResponses(context.Context, *connect.Request[v1.SubmitGrokBotUserComputerResponsesRequest]) (*connect.Response[v1.SubmitGrokBotUserComputerResponsesResponse], error)
+	WithdrawGrokBotUserComputerPresence(context.Context, *connect.Request[v1.WithdrawGrokBotUserComputerPresenceRequest]) (*connect.Response[v1.WithdrawGrokBotUserComputerPresenceResponse], error)
 }
 
 // NewGrokBotServiceClient constructs a client for the aiserver.v1.GrokBotService service. By
@@ -100,15 +104,22 @@ func NewGrokBotServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(grokBotServiceMethods.ByName("SubmitGrokBotUserComputerResponses")),
 			connect.WithClientOptions(opts...),
 		),
+		withdrawGrokBotUserComputerPresence: connect.NewClient[v1.WithdrawGrokBotUserComputerPresenceRequest, v1.WithdrawGrokBotUserComputerPresenceResponse](
+			httpClient,
+			baseURL+GrokBotServiceWithdrawGrokBotUserComputerPresenceProcedure,
+			connect.WithSchema(grokBotServiceMethods.ByName("WithdrawGrokBotUserComputerPresence")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // grokBotServiceClient implements GrokBotServiceClient.
 type grokBotServiceClient struct {
-	issueGrokBotUserComputerCredential *connect.Client[v1.IssueGrokBotUserComputerCredentialRequest, v1.IssueGrokBotUserComputerCredentialResponse]
-	watchGrokBotUserComputerRequests   *connect.Client[v1.WatchGrokBotUserComputerRequestsRequest, v1.WatchGrokBotUserComputerRequestsEvent]
-	pollGrokBotUserComputerRequests    *connect.Client[v1.PollGrokBotUserComputerRequestsRequest, v1.PollGrokBotUserComputerRequestsResponse]
-	submitGrokBotUserComputerResponses *connect.Client[v1.SubmitGrokBotUserComputerResponsesRequest, v1.SubmitGrokBotUserComputerResponsesResponse]
+	issueGrokBotUserComputerCredential  *connect.Client[v1.IssueGrokBotUserComputerCredentialRequest, v1.IssueGrokBotUserComputerCredentialResponse]
+	watchGrokBotUserComputerRequests    *connect.Client[v1.WatchGrokBotUserComputerRequestsRequest, v1.WatchGrokBotUserComputerRequestsEvent]
+	pollGrokBotUserComputerRequests     *connect.Client[v1.PollGrokBotUserComputerRequestsRequest, v1.PollGrokBotUserComputerRequestsResponse]
+	submitGrokBotUserComputerResponses  *connect.Client[v1.SubmitGrokBotUserComputerResponsesRequest, v1.SubmitGrokBotUserComputerResponsesResponse]
+	withdrawGrokBotUserComputerPresence *connect.Client[v1.WithdrawGrokBotUserComputerPresenceRequest, v1.WithdrawGrokBotUserComputerPresenceResponse]
 }
 
 // IssueGrokBotUserComputerCredential calls
@@ -134,12 +145,19 @@ func (c *grokBotServiceClient) SubmitGrokBotUserComputerResponses(ctx context.Co
 	return c.submitGrokBotUserComputerResponses.CallUnary(ctx, req)
 }
 
+// WithdrawGrokBotUserComputerPresence calls
+// aiserver.v1.GrokBotService.WithdrawGrokBotUserComputerPresence.
+func (c *grokBotServiceClient) WithdrawGrokBotUserComputerPresence(ctx context.Context, req *connect.Request[v1.WithdrawGrokBotUserComputerPresenceRequest]) (*connect.Response[v1.WithdrawGrokBotUserComputerPresenceResponse], error) {
+	return c.withdrawGrokBotUserComputerPresence.CallUnary(ctx, req)
+}
+
 // GrokBotServiceHandler is an implementation of the aiserver.v1.GrokBotService service.
 type GrokBotServiceHandler interface {
 	IssueGrokBotUserComputerCredential(context.Context, *connect.Request[v1.IssueGrokBotUserComputerCredentialRequest]) (*connect.Response[v1.IssueGrokBotUserComputerCredentialResponse], error)
 	WatchGrokBotUserComputerRequests(context.Context, *connect.Request[v1.WatchGrokBotUserComputerRequestsRequest], *connect.ServerStream[v1.WatchGrokBotUserComputerRequestsEvent]) error
 	PollGrokBotUserComputerRequests(context.Context, *connect.Request[v1.PollGrokBotUserComputerRequestsRequest]) (*connect.Response[v1.PollGrokBotUserComputerRequestsResponse], error)
 	SubmitGrokBotUserComputerResponses(context.Context, *connect.Request[v1.SubmitGrokBotUserComputerResponsesRequest]) (*connect.Response[v1.SubmitGrokBotUserComputerResponsesResponse], error)
+	WithdrawGrokBotUserComputerPresence(context.Context, *connect.Request[v1.WithdrawGrokBotUserComputerPresenceRequest]) (*connect.Response[v1.WithdrawGrokBotUserComputerPresenceResponse], error)
 }
 
 // NewGrokBotServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -173,6 +191,12 @@ func NewGrokBotServiceHandler(svc GrokBotServiceHandler, opts ...connect.Handler
 		connect.WithSchema(grokBotServiceMethods.ByName("SubmitGrokBotUserComputerResponses")),
 		connect.WithHandlerOptions(opts...),
 	)
+	grokBotServiceWithdrawGrokBotUserComputerPresenceHandler := connect.NewUnaryHandler(
+		GrokBotServiceWithdrawGrokBotUserComputerPresenceProcedure,
+		svc.WithdrawGrokBotUserComputerPresence,
+		connect.WithSchema(grokBotServiceMethods.ByName("WithdrawGrokBotUserComputerPresence")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/aiserver.v1.GrokBotService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case GrokBotServiceIssueGrokBotUserComputerCredentialProcedure:
@@ -183,6 +207,8 @@ func NewGrokBotServiceHandler(svc GrokBotServiceHandler, opts ...connect.Handler
 			grokBotServicePollGrokBotUserComputerRequestsHandler.ServeHTTP(w, r)
 		case GrokBotServiceSubmitGrokBotUserComputerResponsesProcedure:
 			grokBotServiceSubmitGrokBotUserComputerResponsesHandler.ServeHTTP(w, r)
+		case GrokBotServiceWithdrawGrokBotUserComputerPresenceProcedure:
+			grokBotServiceWithdrawGrokBotUserComputerPresenceHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -206,6 +232,10 @@ func (UnimplementedGrokBotServiceHandler) PollGrokBotUserComputerRequests(contex
 
 func (UnimplementedGrokBotServiceHandler) SubmitGrokBotUserComputerResponses(context.Context, *connect.Request[v1.SubmitGrokBotUserComputerResponsesRequest]) (*connect.Response[v1.SubmitGrokBotUserComputerResponsesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiserver.v1.GrokBotService.SubmitGrokBotUserComputerResponses is not implemented"))
+}
+
+func (UnimplementedGrokBotServiceHandler) WithdrawGrokBotUserComputerPresence(context.Context, *connect.Request[v1.WithdrawGrokBotUserComputerPresenceRequest]) (*connect.Response[v1.WithdrawGrokBotUserComputerPresenceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("aiserver.v1.GrokBotService.WithdrawGrokBotUserComputerPresence is not implemented"))
 }
 
 // DashboardServiceClient is a client for the aiserver.v1.DashboardService service.
