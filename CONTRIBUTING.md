@@ -10,7 +10,9 @@ Shell tests run against bash and, when found, zsh: set `GROK_TEST_ZSH` to a zsh
 binary or put zsh on `PATH`.
 
 `testdata/compat/0.75.8/` holds reference data from the desktop client;
-`scripts/compat-reference.mjs` regenerates it.
+`scripts/compat-reference.mjs` regenerates it. `scripts/extract-proto.py`
+reconstructs `.proto` schemas from the client's bundle without running it;
+`api/proto/` is a subset of its output.
 
 ## Releases
 
