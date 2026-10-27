@@ -22,16 +22,11 @@ service.
 
 ## How to connect Grok Bot to a headless server
 
-1. Install. The installer puts the binary in `~/.local/bin`.
+1. Install. The installer puts the binary in `~/.local/bin`. To install a
+   specific release, pass its tag: `bash -s v0.1.0`.
 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash
-   ```
-
-   To install a specific release, pass its tag:
-
-   ```sh
-   curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash -s v0.1.0
    ```
 
 2. Sign in. `login` prints a sign-in link that you open on any
