@@ -16,9 +16,9 @@ controller and the local execution daemon: it signs in, registers the machine
 as a remote computer and executes the agent's requests itself. You don't need
 the Grok Bot desktop app, Electron, Node.js, X11, Wayland or Xvfb on the server.
 
-Use it to run Grok Bots on a remote server over SSH, give the agent access to a
-build machine, or keep a headless connection to Grok Bot running as a systemd
-service with `grokbot-tunnel install`.
+Use it to run Grok Bots on a remote server over SSH or give the agent access to
+a build machine. It runs as a systemd service that connects at boot, restarts
+on failure and keeps itself up to date.
 
 ## How to connect Grok Bot to a headless server
 
@@ -38,71 +38,69 @@ service with `grokbot-tunnel install`.
    grokbot-tunnel login
    ```
 
-3. Connect. `connect` makes the server appear as a computer in Grok Bot and
-   runs the agent's requests until you press Ctrl-C. Ctrl-C stops running
-   commands; background commands keep running.
-
-   ```sh
-   grokbot-tunnel connect
-   ```
-
-4. Optionally, run it as a service. `install` sets up a systemd service that
-   runs `connect` with the given flags, starts at boot and restarts on
-   failure. `--permission` is required here (see below).
+3. Start the service. `install` sets up a systemd service that makes the server
+   appear as a computer in Grok Bot and runs the agent's requests. It returns
+   once the server is connected, or fails with the service log.
 
    ```sh
    grokbot-tunnel install --permission always
    ```
 
+   `--permission` decides what the agent may do, since the service has no
+   terminal to ask you in: `always` runs every action the agent requests,
+   `ask` runs only the actions you approve in Grok Bot, `never` refuses all.
+
+The service starts at boot, restarts on failure and updates grokbot-tunnel
+daily. Check on it with:
+
+```sh
+systemctl --user status grokbot-tunnel
+journalctl --user -u grokbot-tunnel -f
+```
+
 Linux on x86_64 (amd64) and arm64 is supported. The server needs bash (or zsh,
 if `$SHELL` points to it). `rg` (ripgrep) is
-optional; with it, directory listings respect `.gitignore`.
+optional; with it, directory listings respect `.gitignore`. Without systemd,
+e.g. in a Docker container, run `connect` instead (see below).
 
-## CLI connect options
+## Options
+
+`install` and `connect` take the same flags. To change them for the service,
+run `install` again with the new ones.
 
 | Flag | Meaning |
 |------|---------|
+| `--permission` | `always` allows everything; `never` refuses everything; `ask` asks before each action. Required for `install`; `connect` defaults to `ask`. |
 | `--root` | Directory for file operations and commands. Defaults to the home directory. |
 | `--label` | Computer name in Grok Bot. Saved for later runs; defaults to the host name. |
-| `--permission` | `ask` (default) asks in the terminal before each action; `always` allows everything; `never` refuses everything. |
+| `--no-auto-update` | `install` only: do not update grokbot-tunnel daily. |
 
-At the `ask` prompt, `y` allows the action, `a` allows all actions until the end
-of the session, anything else refuses it. Without a terminal, `ask` refuses
-every request, so use `--permission always` when running without a terminal.
-If Grok Bot manages permissions itself, the tunnel
-does not prompt and runs only the actions Grok Bot approved.
+With `ask`, the service runs only actions approved in Grok Bot, and `connect`
+in a terminal asks there: `y` allows the action, `a` allows all actions until
+the end of the session, anything else refuses it. If Grok Bot manages
+permissions itself, the tunnel never asks and runs only the actions Grok Bot
+approved.
 
-Only one `connect` runs per user at a time: a second one, e.g. in a terminal
-while the service is running, exits with a message saying how to stop the
-first.
-
-## Run as a systemd service
-
-`grokbot-tunnel install` takes the same flags as `connect`; `--permission` is
-required, since a service has no terminal to ask in. Run it again to change the
-flags.
+## Managing the service
 
 - A regular user gets a service of their systemd user manager
   (`~/.config/systemd/user/grokbot-tunnel.service`), and lingering is enabled so
-  that it runs without a login session. Manage it with
-  `systemctl --user status grokbot-tunnel` and
-  `journalctl --user -u grokbot-tunnel -f`.
-- Root gets a system service (`/etc/systemd/system/grokbot-tunnel.service`):
-  `systemctl status grokbot-tunnel`, `journalctl -u grokbot-tunnel -f`.
-- `install` returns once the tunnel is connected, or fails with its log.
+  that it runs without a login session. Root gets a system service
+  (`/etc/systemd/system/grokbot-tunnel.service`); drop `--user` from the
+  `systemctl` and `journalctl` commands.
 - The service keeps the `PATH` and `SHELL` of the shell you run `install` in,
   so the agent's commands find the same programs.
 - Stopping or restarting the service also stops background commands the agent
-  started, unlike Ctrl-C on `connect`.
+  started.
 - After the login is revoked the service stops; run `grokbot-tunnel login`
   and then `install` again.
-- A daily timer updates grokbot-tunnel and restarts the service. Pass
-  `--no-auto-update` to `install` to turn it off.
-
-`grokbot-tunnel uninstall` stops and removes the service and keeps the binary
-and your login.
+- `grokbot-tunnel uninstall` stops and removes the service and keeps the binary
+  and your login.
 
 ## Update
+
+The service updates itself daily unless installed with `--no-auto-update`. To
+update now:
 
 ```sh
 grokbot-tunnel update
@@ -112,6 +110,20 @@ grokbot-tunnel update
 `grokbot-tunnel update v0.2.0`), verifies its checksum, replaces the binary and
 restarts the service. `--check` only shows the versions; `--force` reinstalls
 the same version or downgrades; `--no-restart` leaves the service alone.
+
+## Run in the foreground
+
+`connect` runs the tunnel in your terminal until you press Ctrl-C, without a
+service: to try it out, to approve actions in the terminal with
+`--permission ask`, or where there is no systemd.
+
+```sh
+grokbot-tunnel connect
+```
+
+Ctrl-C stops running commands; background commands keep running. Only one
+tunnel runs per user at a time, so stop the service first
+(`systemctl --user stop grokbot-tunnel`); otherwise `connect` exits and says so.
 
 ## What the agent gets
 
@@ -128,8 +140,8 @@ the same version or downgrades; `--no-restart` leaves the service alone.
   the starting directory, not what commands can access. Codex and Claude Code
   settings are read from the home directory even if it is outside `--root`.
 - Tokens are stored unencrypted in `~/.grok/bot-tunnel/`, readable only by you.
-- `connect --debug` prints requests in full, including commands and file
-  contents.
+- `--debug` logs requests in full, including commands and file contents; for
+  the service they go to the journal.
 
 To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
 

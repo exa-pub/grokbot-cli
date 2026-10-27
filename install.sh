@@ -182,4 +182,4 @@ esac
 
 echo "" >&2
 echo "✅ Installation complete! Run '${BINARY} login' to get started." >&2
-echo "   Then run '${BINARY} connect', or '${BINARY} install --permission always' to run it as a service." >&2
+echo "   Then run '${BINARY} install --permission always' to connect this server as a service." >&2
