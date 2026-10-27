@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -29,6 +30,9 @@ type Auth struct {
 type Machine struct {
 	MachineID string `json:"machine_id"`
 	Label     string `json:"label"`
+	// HostID is the HostID of the host that created MachineID. A different
+	// value means the store was copied from another host.
+	HostID string `json:"host_id,omitempty"`
 }
 
 // Computer is a short-lived credential for the user-computer channel.
@@ -141,21 +145,40 @@ func (s *Store) Lock(ctx context.Context) (func(), error) {
 	}
 }
 
-// Machine loads the machine identity, creating it on first use.
+// Machine loads the machine identity, creating it on first use. Identities
+// saved before HostID existed get the current host's.
 func (s *Store) Machine() (Machine, error) {
 	var m Machine
 	err := s.Load("machine", &m)
 	switch {
 	case err == nil && m.MachineID == "":
 		return m, errors.New("invalid machine.json: empty machine_id")
-	case err == nil:
+	case err == nil && (m.HostID != "" || HostID() == ""):
 		return m, nil
+	case err == nil:
+		m.HostID = HostID()
+		return m, s.Save("machine", m)
 	case !errors.Is(err, os.ErrNotExist):
 		return m, err
 	}
 	m.MachineID = UUID()
+	m.HostID = HostID()
 	if host, err := os.Hostname(); err == nil {
 		m.Label = host
 	}
 	return m, s.Save("machine", m)
+}
+
+// machineIDPath is the systemd machine ID, unique per installation.
+var machineIDPath = "/etc/machine-id"
+
+// HostID identifies this host by its machine ID, or is empty without one.
+// The host name would not do: containers recreated on the same volume get a
+// new one each time.
+func HostID() string {
+	b, err := os.ReadFile(machineIDPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }

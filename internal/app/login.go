@@ -55,6 +55,10 @@ func Login(ctx context.Context, opts LoginOptions, out io.Writer) error {
 	if opts.TeamID != "" {
 		identity.TeamID = opts.TeamID
 	}
+	var previous config.Auth
+	if e.store.Load("auth", &previous) != nil {
+		previous = config.Auth{}
+	}
 	if err = saveLogin(ctx, e.store, identity); err != nil {
 		return err
 	}
@@ -78,7 +82,26 @@ func Login(ctx context.Context, opts LoginOptions, out io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(out, "Logged in as %s\n", identity.Email)
+	warnStaleConnect(e.store, previous, identity, out)
 	return nil
+}
+
+// warnStaleConnect tells the user that a running connect keeps the account it
+// started with: it holds the old tokens and leaves the new login alone.
+func warnStaleConnect(store *config.Store, previous, current config.Auth, out io.Writer) {
+	before := auth.AccountScope(previous)
+	if before == "" || before == auth.AccountScope(current) {
+		return
+	}
+	h, held, err := store.Probe("connect")
+	if err != nil || !held {
+		return
+	}
+	account := previous.Email
+	if account == "" {
+		account = "the previous account"
+	}
+	fmt.Fprintf(out, "Note: grokbot-tunnel connect (pid %d) keeps serving %s until it is restarted\n", h.PID, account)
 }
 
 // saveLogin replaces the saved identity. It holds the store lock so that a

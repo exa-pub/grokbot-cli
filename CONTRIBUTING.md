@@ -28,4 +28,10 @@ git push origin v0.1.0
 
 CI builds linux/amd64 and linux/arm64 archives and publishes them to a GitHub
 Release with `checksums.txt`. Tags with a hyphen (`v0.2.0-rc1`) become
-pre-releases.
+pre-releases. `grokbot-tunnel update` and the update timer installed by
+`grokbot-tunnel install` download these archives, so keep their names and the
+`checksums.txt` format.
+
+Package builds should pass
+`-X github.com/exa-pub/grokbot-tunnel/internal/cli.packager=<name>` in
+`-ldflags`: such builds refuse `update` and do not install the update timer.

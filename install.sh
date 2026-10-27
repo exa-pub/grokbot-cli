@@ -151,6 +151,21 @@ if [ "$code" -ne 0 ]; then
 fi
 info "Installed ${installed} to ${INSTALL_DIR}/${BINARY}"
 
+# A running service keeps the old binary until it restarts. Root has a system
+# service, other users a service of their user manager.
+sctl() {
+    if [ "$(id -u)" -eq 0 ]; then systemctl "$@"; else systemctl --user "$@"; fi
+}
+if command -v systemctl >/dev/null 2>&1 && sctl is-active --quiet grokbot-tunnel 2>/dev/null; then
+    exec_start="$(sctl show --property=ExecStart --value grokbot-tunnel 2>/dev/null || true)"
+    case "$exec_start" in
+        *"path=${INSTALL_DIR}/${BINARY} "*)
+            info "Restarting the ${BINARY} service"
+            sctl restart --no-block grokbot-tunnel || warn "could not restart the service; restart it yourself"
+            ;;
+    esac
+fi
+
 # The project used to be called grokbot-cli; an old copy may still be on PATH.
 if old="$(command -v "$OLD_BINARY" 2>/dev/null)"; then
     warn "Found the old ${OLD_BINARY} binary at ${old}; it is no longer updated. Remove it with:"
@@ -167,3 +182,4 @@ esac
 
 echo "" >&2
 echo "✅ Installation complete! Run '${BINARY} login' to get started." >&2
+echo "   Then run '${BINARY} connect', or '${BINARY} install --permission always' to run it as a service." >&2
