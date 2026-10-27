@@ -20,6 +20,9 @@ Push a tag to publish a release:
 
 ```sh
 git tag v0.1.0
+```
+
+```sh
 git push origin v0.1.0
 ```
 

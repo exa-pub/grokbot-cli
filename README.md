@@ -5,32 +5,51 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/exa-pub/grokbot-tunnel)](go.mod)
 [![License: MIT](https://img.shields.io/github/license/exa-pub/grokbot-tunnel)](LICENSE)
 
-**Headless mode for Grok Bot.** grokbot-tunnel is a CLI that connects a
-headless Linux server (VPS, cloud VM, home server, container, Raspberry Pi) to
-Grok Bot as a computer. The Grok Bot agent can then run commands and work with
-files on that server, the same way it does on a machine with the Grok Bot
-desktop app, but without a desktop, GUI or browser.
+**Headless Grok Bot for Linux servers.** grokbot-tunnel is a CLI that connects a
+headless Linux server (VPS, cloud VM, home server, Docker container, Raspberry
+Pi) to Grok Bot as a local computer. The Grok Bot agent can then run commands
+and work with files on that server, the same way it does on a machine with the
+Grok Bot desktop app, but without a desktop, GUI or browser.
+
+It is a single static Go binary that does the job of both the headless
+controller and the local execution daemon: it signs in, registers the machine
+as a remote computer and executes the agent's requests itself. You don't need
+the Grok Bot desktop app, Electron, Node.js, X11, Wayland or Xvfb on the server.
 
 Use it to run Grok Bots on a remote server over SSH, give the agent access to a
-build machine, or keep a headless connection to Grok Bot running under systemd.
+build machine, or keep a headless connection to Grok Bot running as a systemd
+service.
 
 ## How to connect Grok Bot to a headless server
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash
-grokbot-tunnel login --no-browser
-grokbot-tunnel connect --root "$HOME/projects"
-```
+1. Install. The installer puts the binary in `~/.local/bin`.
 
-1. The installer puts the binary in `~/.local/bin`. Pass a tag to install a
-   specific release: `... | bash -s v0.1.0`.
-2. `login --no-browser` prints a sign-in link that you open on any device. On a
-   machine with a browser, plain `login` opens it for you. Use `--team ID` to
-   select a team. This is how sign-in works on a headless server without a
-   browser.
-3. `connect` makes the server appear as a computer in Grok Bot and runs the
-   agent's requests until you press Ctrl-C. Ctrl-C stops running commands;
-   background commands keep running.
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash
+   ```
+
+   To install a specific release, pass its tag:
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/exa-pub/grokbot-tunnel/main/install.sh | bash -s v0.1.0
+   ```
+
+2. Sign in. `login` prints a sign-in link that you open on any
+   device. On a machine with a browser, plain `login` opens it for you. Use
+   `--team ID` to select a team. This is how sign-in works on a headless server
+   without a browser.
+
+   ```sh
+   grokbot-tunnel login
+   ```
+
+3. Connect. `connect` makes the server appear as a computer in Grok Bot and
+   runs the agent's requests until you press Ctrl-C. Ctrl-C stops running
+   commands; background commands keep running.
+
+   ```sh
+   grokbot-tunnel connect
+   ```
 
 Linux on x86_64 (amd64) and arm64 is supported. The server needs bash (or zsh,
 if `$SHELL` points to it). `rg` (ripgrep) is
@@ -69,3 +88,6 @@ does not prompt and runs only the actions Grok Bot approved.
   contents.
 
 To build from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+grokbot-tunnel is an independent project, not affiliated with or endorsed by
+xAI. Grok Bot is a trademark of its owner.
