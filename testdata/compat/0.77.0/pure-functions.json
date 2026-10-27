@@ -1,0 +1,390 @@
+{
+  "provenance": {
+    "version": "0.77.0",
+    "platform": "linux",
+    "method": "isolated pure functions from source; not desktop traffic",
+    "source": "local-exec-daemon/main.cjs",
+    "markers": [
+      "J2r",
+      "v_e",
+      "ude",
+      "GO",
+      "Pat",
+      "__e"
+    ]
+  },
+  "ranges": [
+    {
+      "text": "",
+      "args": {},
+      "result": {
+        "content": "",
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree\n",
+      "args": {
+        "offset": 2,
+        "limit": 1
+      },
+      "result": {
+        "content": "two",
+        "rangeApplied": true
+      }
+    },
+    {
+      "text": "one\ntwo\n",
+      "args": {
+        "offset": 20
+      },
+      "result": {
+        "content": "one\ntwo\n",
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree",
+      "args": {
+        "offset": -2
+      },
+      "result": {
+        "content": "two\nthree",
+        "rangeApplied": true
+      }
+    }
+  ],
+  "streaming": [
+    {
+      "text": "",
+      "args": {},
+      "result": {
+        "content": "",
+        "totalLines": 1,
+        "truncated": false,
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree\n",
+      "args": {
+        "offset": 2,
+        "limit": 1
+      },
+      "result": {
+        "content": "two",
+        "totalLines": 4,
+        "truncated": false,
+        "rangeApplied": true
+      }
+    },
+    {
+      "text": "one\ntwo\n",
+      "args": {
+        "offset": 20
+      },
+      "result": {
+        "content": "one\ntwo\n",
+        "totalLines": 3,
+        "truncated": false,
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree",
+      "args": {
+        "offset": -2
+      },
+      "result": {
+        "content": "two\nthree",
+        "totalLines": 3,
+        "truncated": false,
+        "rangeApplied": true
+      }
+    },
+    {
+      "text": "one\ntwo\nthree\n",
+      "args": {
+        "maxChars": 5
+      },
+      "result": {
+        "content": "one\ntwo",
+        "totalLines": 4,
+        "truncated": true,
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree\n",
+      "args": {
+        "maxChars": 7
+      },
+      "result": {
+        "content": "one\ntwo\nthree",
+        "totalLines": 4,
+        "truncated": true,
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree",
+      "args": {
+        "maxChars": 100
+      },
+      "result": {
+        "content": "one\ntwo\nthree",
+        "totalLines": 3,
+        "truncated": false,
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "one\ntwo\nthree\nfour\n",
+      "args": {
+        "offset": 2,
+        "maxChars": 4
+      },
+      "result": {
+        "content": "two\nthree",
+        "totalLines": 5,
+        "truncated": true,
+        "rangeApplied": true
+      }
+    },
+    {
+      "text": "one\ntwo\nthree\nfour\n",
+      "args": {
+        "offset": 2,
+        "limit": 1,
+        "maxChars": 1
+      },
+      "result": {
+        "content": "two",
+        "totalLines": 5,
+        "truncated": false,
+        "rangeApplied": true
+      }
+    },
+    {
+      "text": "one\ntwo\nthree\nfour",
+      "args": {
+        "offset": -2,
+        "maxChars": 1
+      },
+      "result": {
+        "content": "three\nfour",
+        "totalLines": 4,
+        "truncated": false,
+        "rangeApplied": true
+      }
+    },
+    {
+      "text": "one\ntwo\n",
+      "args": {
+        "offset": 20,
+        "maxChars": 1
+      },
+      "result": {
+        "content": "one\ntwo\n",
+        "totalLines": 3,
+        "truncated": false,
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "ab\r\ncd\r\nef\r\n",
+      "args": {
+        "maxChars": 5
+      },
+      "result": {
+        "content": "ab\ncd\nef",
+        "totalLines": 4,
+        "truncated": true,
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "ab\r\ncd\r\nef\r\n",
+      "args": {
+        "maxChars": 4
+      },
+      "result": {
+        "content": "ab\ncd",
+        "totalLines": 4,
+        "truncated": true,
+        "rangeApplied": false
+      }
+    },
+    {
+      "text": "😀😀\nx",
+      "args": {
+        "maxChars": 1
+      },
+      "result": {
+        "content": "😀😀",
+        "totalLines": 2,
+        "truncated": true,
+        "rangeApplied": false
+      }
+    },
+    {
+      "textRuns": [
+        {
+          "char": "a",
+          "count": 70000
+        },
+        {
+          "char": "\n",
+          "count": 1
+        },
+        {
+          "char": "b",
+          "count": 1
+        }
+      ],
+      "args": {
+        "maxChars": 10
+      },
+      "result": {
+        "contentRuns": [
+          {
+            "char": "a",
+            "count": 65536
+          }
+        ],
+        "totalLines": 2,
+        "truncated": true,
+        "rangeApplied": false
+      }
+    },
+    {
+      "textRuns": [
+        {
+          "char": "a",
+          "count": 1
+        },
+        {
+          "char": "é",
+          "count": 40000
+        }
+      ],
+      "args": {
+        "maxChars": 10
+      },
+      "result": {
+        "contentRuns": [
+          {
+            "char": "a",
+            "count": 1
+          },
+          {
+            "char": "é",
+            "count": 32767
+          }
+        ],
+        "totalLines": 1,
+        "truncated": true,
+        "rangeApplied": false
+      }
+    },
+    {
+      "textRuns": [
+        {
+          "char": "﻿",
+          "count": 1
+        },
+        {
+          "char": "a",
+          "count": 70000
+        }
+      ],
+      "args": {
+        "maxChars": 10
+      },
+      "result": {
+        "contentRuns": [
+          {
+            "char": "a",
+            "count": 65533
+          }
+        ],
+        "totalLines": 1,
+        "truncated": true,
+        "rangeApplied": false
+      }
+    },
+    {
+      "textRuns": [
+        {
+          "char": "x",
+          "count": 1
+        },
+        {
+          "char": "\n",
+          "count": 1
+        },
+        {
+          "char": "a",
+          "count": 140000
+        },
+        {
+          "char": "\n",
+          "count": 1
+        },
+        {
+          "char": "y",
+          "count": 1
+        }
+      ],
+      "args": {
+        "offset": 2,
+        "maxChars": 70000
+      },
+      "result": {
+        "contentRuns": [
+          {
+            "char": "a",
+            "count": 131070
+          }
+        ],
+        "totalLines": 3,
+        "truncated": true,
+        "rangeApplied": true
+      }
+    }
+  ],
+  "fallback": [
+    {
+      "hex": "636166e920617520616974",
+      "mostlyUtf8": false,
+      "lossy": "caf� au ait"
+    },
+    {
+      "hex": "d0bfd180d0b8d0b2d0b5d18220ff20d0bcd0b8d180",
+      "mostlyUtf8": true,
+      "lossy": "привет � мир"
+    },
+    {
+      "hex": "e28220616263",
+      "mostlyUtf8": false,
+      "lossy": "� abc"
+    },
+    {
+      "hex": "e697a5e69cace8aa9efffee697a5",
+      "mostlyUtf8": false,
+      "lossy": "日本語��日"
+    },
+    {
+      "hex": "61fffe62",
+      "mostlyUtf8": false,
+      "lossy": "a��b"
+    }
+  ],
+  "discoveryMissing": {
+    "source": "codex",
+    "found": false,
+    "sessionCount": 0,
+    "items": []
+  },
+  "terminalHeader": "---\npid: 42\ncwd: \"/workspace\"\ncommand: \"printf hello\"\nstatus: running  \nstarted_at: 2026-01-01T00:00:00.000Z\nrunning_for_ms: 0        \n---\n"
+}

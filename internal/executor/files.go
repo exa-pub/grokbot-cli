@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding/charmap"
@@ -37,6 +38,12 @@ const (
 	// mostlyCRLF is the share of CRLF line endings, in percent, above which
 	// they are normalized to LF.
 	mostlyCRLF = 5
+	// readChunk is the size of the chunks the desktop reads text files in;
+	// content beyond max_chars may run up to one chunk further.
+	readChunk = 64 << 10
+	// sniffSize is how much of a file that is not UTF-8 decides between lossy
+	// UTF-8 and Latin-1.
+	sniffSize = 1 << 20
 )
 
 // binaryExtensions are returned as data instead of text.
@@ -56,7 +63,7 @@ func (e *Executor) upload(path string, data []byte) error {
 		return err
 	}
 	if len(data) > MaxFile {
-		return errFileTooLarge
+		return fileTooLarge(int64(len(data)))
 	}
 	if rel, err = e.uploadTarget(rel); err != nil {
 		return err
@@ -162,8 +169,12 @@ func (e *Executor) open(path string) (*os.File, error) {
 		return nil, err
 	}
 	st, err := f.Stat()
-	if err == nil && (!st.Mode().IsRegular() || st.Size() > MaxFile) {
-		err = errors.New("expected regular file no larger than 100 MiB")
+	switch {
+	case err != nil:
+	case !st.Mode().IsRegular():
+		err = errors.New("expected regular file")
+	case st.Size() > MaxFile:
+		err = fileTooLarge(st.Size())
 	}
 	if err != nil {
 		f.Close()
@@ -296,34 +307,149 @@ func (e *Executor) readAll(rel string) ([]byte, error) {
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, MaxFile+1))
 	if err == nil && len(b) > MaxFile {
-		err = errFileTooLarge
+		err = fileTooLarge(int64(len(b)))
 	}
 	return b, err
 }
 
+// fileText is a decoded text file.
+type fileText struct {
+	text     string
+	terminal bool // a terminal file, read whole up to max_chars
+	// base is the file offset from which text holds the file's bytes as they
+	// are, or -1 if it was converted.
+	base int
+}
+
 // decodeFile decodes text, keeping the envelope of terminal files as UTF-8.
-func decodeFile(rel string, b []byte, hint string) (string, error) {
+func decodeFile(rel string, b []byte, hint string) (fileText, error) {
 	if filepath.Dir(rel) == terminalsDir && terminalHeaderEnd(b) >= 0 {
-		return decodeTerminalText(b, hint)
+		text, err := decodeTerminalText(b, hint)
+		return fileText{text: text, terminal: true, base: -1}, err
 	}
-	return decodeText(b, hint)
+	text, base, err := decodeText(b, hint)
+	return fileText{text: text, base: base}, err
 }
 
 // setTextRange stores the requested lines of text in r.
-func setTextRange(r *agentv1.ReadSuccess, text string, x *agentv1.ReadArgs) {
-	if strings.Count(text, "\r\n")*100 >= max(1, strings.Count(text, "\n"))*mostlyCRLF {
-		text = strings.ReplaceAll(text, "\r\n", "\n")
-	}
+func setTextRange(r *agentv1.ReadSuccess, f fileText, x *agentv1.ReadArgs) {
+	text := f.text
+	normalize := strings.Count(text, "\r\n")*100 >= max(1, strings.Count(text, "\n"))*mostlyCRLF
 	lines := splitLines(text)
 	start, end := lineRange(len(lines), x.Offset, x.Limit)
-	content := strings.Join(lines[start:end], "\n")
+	ranged := x.Offset != nil || x.Limit != nil
 	r.TotalLines = int32(min(len(lines), math.MaxInt32)) //nolint:gosec // clamped
-	r.RangeApplied = (x.Offset != nil || x.Limit != nil) && text != "" && (x.Offset == nil || int(x.GetOffset()) <= len(lines))
+	r.RangeApplied = ranged && text != "" && (x.Offset == nil || int(x.GetOffset()) <= len(lines))
+	selected := lines[start:end]
+	units, byLines := maxCharsLimit(f, x, r.RangeApplied)
+	if byLines {
+		selected, r.Truncated = limitChars(lines, start, end, int(x.GetMaxChars()), f.base)
+	}
+	if normalize {
+		selected = stripCR(lines, start, selected)
+	}
+	content := strings.Join(selected, "\n")
+	if units >= 0 && utf16Len(content) > units {
+		content, r.Truncated = truncateUTF16(content, units), true
+	}
 	if len(content) > maxTextRead {
 		content = truncateUTF8(content, maxTextRead)
 		r.Truncated = true
 	}
 	r.Output = &agentv1.ReadSuccess_Content{Content: content}
+}
+
+// maxCharsLimit returns how many UTF-16 code units of content max_chars
+// leaves, or -1, and whether the lines are limited first as the desktop's
+// streaming read does. Like the desktop, max_chars does not limit reads from
+// the end, nor an offset past the end, which returns the whole text. A
+// terminal file is read whole up to two characters more than asked, so a
+// longer one shows as truncated, and its ranges are not limited.
+func maxCharsLimit(f fileText, x *agentv1.ReadArgs, rangeApplied bool) (int, bool) {
+	ranged := x.Offset != nil || x.Limit != nil
+	switch {
+	case x.MaxChars == nil:
+		return -1, false
+	case f.terminal && ranged:
+		return -1, false
+	case f.terminal:
+		return int(x.GetMaxChars()) + 2, false
+	case x.GetOffset() < 0 || ranged && !rangeApplied:
+		return -1, false
+	}
+	return int(x.GetMaxChars()) + readChunk, true
+}
+
+// stripCR removes the CR of the CRLF endings of selected, the lines of
+// lines from first on. A line that max_chars cut short has no ending.
+func stripCR(lines []string, first int, selected []string) []string {
+	out := slices.Clone(selected)
+	for i, line := range out {
+		if n := first + i; n < len(lines)-1 && len(line) == len(lines[n]) {
+			out[i] = strings.TrimSuffix(line, "\r")
+		}
+	}
+	return out
+}
+
+// limitChars returns lines[first:last] up to the line that takes their
+// UTF-16 length past maxChars, as the desktop's streaming read does; the
+// newlines between lines count, CRs of line endings do not. It reports
+// whether more of the range was left out. When the lines hold the file's
+// bytes from offset base on, the desktop's read chunks are followed: a line
+// that went past maxChars by a chunk boundary inside it ends there.
+func limitChars(lines []string, first, last, maxChars, base int) ([]string, bool) {
+	at := base
+	if base >= 0 {
+		for _, line := range lines[:first] {
+			at += len(line) + 1
+		}
+	}
+	count := 0
+	for i := first; i < last; i++ {
+		line := lines[i]
+		sep := min(i-first, 1)
+		for b := (at/readChunk + 1) * readChunk; base >= 0 && b < at+len(line); b += readChunk {
+			n := b - at
+			for n > 0 && !utf8.RuneStart(line[n]) {
+				n-- // a character the chunk cuts belongs to the next one
+			}
+			if n > 0 && count+sep+utf16Len(line[:n])-1 > maxChars {
+				return append(lines[first:i:i], line[:n]), true
+			}
+		}
+		count += sep + utf16Len(line)
+		if i < len(lines)-1 && strings.HasSuffix(line, "\r") {
+			count--
+		}
+		if count > maxChars {
+			return lines[first : i+1], i+1 < last
+		}
+		at += len(line) + 1
+	}
+	return lines[first:last], false
+}
+
+// utf16Len returns the length of s in UTF-16 code units, as JavaScript
+// counts characters.
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n += utf16.RuneLen(r)
+	}
+	return n
+}
+
+// truncateUTF16 cuts s to at most n UTF-16 code units without splitting a
+// character.
+func truncateUTF16(s string, n int) string {
+	units := 0
+	for i, r := range s {
+		if units += utf16.RuneLen(r); units > n {
+			return s[:i]
+		}
+	}
+	return s
 }
 
 // truncateUTF8 cuts s to at most n bytes at a rune boundary.
@@ -338,21 +464,82 @@ func truncateUTF8(s string, n int) string {
 }
 
 // decodeText decodes b using the encoding hint. Without a hint it honors a
-// UTF-16 BOM, strips a UTF-8 BOM and falls back to Latin-1 for invalid UTF-8.
-func decodeText(b []byte, hint string) (string, error) {
+// UTF-16 BOM and strips a UTF-8 BOM; invalid UTF-8 is decoded as lossy UTF-8
+// or, if it does not look like UTF-8, as Latin-1. It also returns the offset
+// in b from which the text holds b's bytes as they are, or -1.
+func decodeText(b []byte, hint string) (string, int, error) {
 	if decoder := textDecoder(b, hint); decoder != nil {
 		out, _, err := transform.Bytes(decoder, b)
-		return string(out), err
+		return string(out), -1, err
 	}
-	b = bytes.TrimPrefix(b, []byte{0xef, 0xbb, 0xbf})
+	base := 0
+	if bytes.HasPrefix(b, []byte{0xef, 0xbb, 0xbf}) {
+		b, base = b[3:], 3
+	}
 	if bytes.IndexByte(b, 0) >= 0 {
-		return "", errBinaryFile
+		return "", -1, errBinaryFile
 	}
-	if !utf8.Valid(b) {
-		out, _, err := transform.Bytes(charmap.ISO8859_1.NewDecoder(), b)
-		return string(out), err
+	if utf8.Valid(b) {
+		return string(b), base, nil
 	}
-	return string(b), nil
+	if mostlyUTF8(lossyUTF8(sniff(b))) {
+		return lossyUTF8(b), -1, nil
+	}
+	out, _, err := transform.Bytes(charmap.ISO8859_1.NewDecoder(), b)
+	return string(out), -1, err
+}
+
+// sniff returns the start of b that decides how invalid UTF-8 is decoded,
+// without a character that the cut leaves incomplete.
+func sniff(b []byte) []byte {
+	if len(b) <= sniffSize {
+		return b
+	}
+	b = b[:sniffSize]
+	for i := len(b) - 1; i >= len(b)-utf8.UTFMax; i-- {
+		if utf8.RuneStart(b[i]) {
+			if !utf8.FullRune(b[i:]) {
+				b = b[:i]
+			}
+			break
+		}
+	}
+	return b
+}
+
+// lossyUTF8 decodes b, replacing each maximal invalid subsequence with
+// U+FFFD as a WHATWG decoder does.
+func lossyUTF8(b []byte) string {
+	out, _, err := transform.Bytes(unicode.UTF8.NewDecoder(), b)
+	if err != nil {
+		return strings.ToValidUTF8(string(b), "�") // not expected: the decoder replaces
+	}
+	return string(out)
+}
+
+// mostlyUTF8 reports whether text decoded from invalid UTF-8 has more
+// characters beyond ASCII than replacement characters, as the desktop
+// decides: a run of them loses its last two to a replacement character that
+// follows, and the two after one do not count.
+func mostlyUTF8(text string) bool {
+	const skip = 2
+	replaced, valid, run, skipped := 0, 0, 0, 0
+	for _, r := range text {
+		for range utf16.RuneLen(r) {
+			switch {
+			case r < utf8.RuneSelf:
+				valid, run, skipped = valid+run, 0, 0
+			case r == utf8.RuneError:
+				replaced++
+				valid, run, skipped = valid+max(0, run-skip), 0, skip
+			case skipped > 0:
+				skipped--
+			default:
+				run++
+			}
+		}
+	}
+	return valid+run > replaced
 }
 
 // textDecoder returns the decoder for hint, or nil to treat b as UTF-8.

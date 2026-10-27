@@ -1659,23 +1659,24 @@ func (x *ShellStreamStart) GetCommand() string {
 }
 
 type SandboxPolicy struct {
-	state                    protoimpl.MessageState         `protogen:"open.v1"`
-	Type                     SandboxPolicy_Type             `protobuf:"varint,1,opt,name=type,proto3,enum=agent.v1.SandboxPolicy_Type" json:"type,omitempty"`
-	NetworkAccess            *bool                          `protobuf:"varint,2,opt,name=network_access,json=networkAccess,proto3,oneof" json:"network_access,omitempty"`
-	AdditionalReadwritePaths []string                       `protobuf:"bytes,3,rep,name=additional_readwrite_paths,json=additionalReadwritePaths,proto3" json:"additional_readwrite_paths,omitempty"`
-	AdditionalReadonlyPaths  []string                       `protobuf:"bytes,4,rep,name=additional_readonly_paths,json=additionalReadonlyPaths,proto3" json:"additional_readonly_paths,omitempty"`
-	DebugOutputDir           *string                        `protobuf:"bytes,5,opt,name=debug_output_dir,json=debugOutputDir,proto3,oneof" json:"debug_output_dir,omitempty"`
-	DisableTmpWrite          *bool                          `protobuf:"varint,7,opt,name=disable_tmp_write,json=disableTmpWrite,proto3,oneof" json:"disable_tmp_write,omitempty"`
-	AllowlistEscalated       *bool                          `protobuf:"varint,8,opt,name=allowlist_escalated,json=allowlistEscalated,proto3,oneof" json:"allowlist_escalated,omitempty"`
-	EnableSharedBuildCache   *bool                          `protobuf:"varint,9,opt,name=enable_shared_build_cache,json=enableSharedBuildCache,proto3,oneof" json:"enable_shared_build_cache,omitempty"`
-	NetworkPolicy            *NetworkPolicy                 `protobuf:"bytes,10,opt,name=network_policy,json=networkPolicy,proto3,oneof" json:"network_policy,omitempty"`
-	NetworkPolicyStrict      *bool                          `protobuf:"varint,11,opt,name=network_policy_strict,json=networkPolicyStrict,proto3,oneof" json:"network_policy_strict,omitempty"`
-	CaptureDenies            *bool                          `protobuf:"varint,12,opt,name=capture_denies,json=captureDenies,proto3,oneof" json:"capture_denies,omitempty"`
-	SkipStatsigDefaults      *bool                          `protobuf:"varint,13,opt,name=skip_statsig_defaults,json=skipStatsigDefaults,proto3,oneof" json:"skip_statsig_defaults,omitempty"`
-	ReadBoundary             SandboxPolicy_ReadBoundaryMode `protobuf:"varint,14,opt,name=read_boundary,json=readBoundary,proto3,enum=agent.v1.SandboxPolicy_ReadBoundaryMode" json:"read_boundary,omitempty"`
-	AdditionalReadPaths      []string                       `protobuf:"bytes,15,rep,name=additional_read_paths,json=additionalReadPaths,proto3" json:"additional_read_paths,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	state                      protoimpl.MessageState         `protogen:"open.v1"`
+	Type                       SandboxPolicy_Type             `protobuf:"varint,1,opt,name=type,proto3,enum=agent.v1.SandboxPolicy_Type" json:"type,omitempty"`
+	NetworkAccess              *bool                          `protobuf:"varint,2,opt,name=network_access,json=networkAccess,proto3,oneof" json:"network_access,omitempty"`
+	AdditionalReadwritePaths   []string                       `protobuf:"bytes,3,rep,name=additional_readwrite_paths,json=additionalReadwritePaths,proto3" json:"additional_readwrite_paths,omitempty"`
+	AdditionalReadonlyPaths    []string                       `protobuf:"bytes,4,rep,name=additional_readonly_paths,json=additionalReadonlyPaths,proto3" json:"additional_readonly_paths,omitempty"`
+	DebugOutputDir             *string                        `protobuf:"bytes,5,opt,name=debug_output_dir,json=debugOutputDir,proto3,oneof" json:"debug_output_dir,omitempty"`
+	DisableTmpWrite            *bool                          `protobuf:"varint,7,opt,name=disable_tmp_write,json=disableTmpWrite,proto3,oneof" json:"disable_tmp_write,omitempty"`
+	AllowlistEscalated         *bool                          `protobuf:"varint,8,opt,name=allowlist_escalated,json=allowlistEscalated,proto3,oneof" json:"allowlist_escalated,omitempty"`
+	EnableSharedBuildCache     *bool                          `protobuf:"varint,9,opt,name=enable_shared_build_cache,json=enableSharedBuildCache,proto3,oneof" json:"enable_shared_build_cache,omitempty"`
+	NetworkPolicy              *NetworkPolicy                 `protobuf:"bytes,10,opt,name=network_policy,json=networkPolicy,proto3,oneof" json:"network_policy,omitempty"`
+	NetworkPolicyStrict        *bool                          `protobuf:"varint,11,opt,name=network_policy_strict,json=networkPolicyStrict,proto3,oneof" json:"network_policy_strict,omitempty"`
+	CaptureDenies              *bool                          `protobuf:"varint,12,opt,name=capture_denies,json=captureDenies,proto3,oneof" json:"capture_denies,omitempty"`
+	SkipStatsigDefaults        *bool                          `protobuf:"varint,13,opt,name=skip_statsig_defaults,json=skipStatsigDefaults,proto3,oneof" json:"skip_statsig_defaults,omitempty"`
+	ReadBoundary               SandboxPolicy_ReadBoundaryMode `protobuf:"varint,14,opt,name=read_boundary,json=readBoundary,proto3,enum=agent.v1.SandboxPolicy_ReadBoundaryMode" json:"read_boundary,omitempty"`
+	AdditionalReadPaths        []string                       `protobuf:"bytes,15,rep,name=additional_read_paths,json=additionalReadPaths,proto3" json:"additional_read_paths,omitempty"`
+	AllowUserOverrideReadPaths *bool                          `protobuf:"varint,16,opt,name=allow_user_override_read_paths,json=allowUserOverrideReadPaths,proto3,oneof" json:"allow_user_override_read_paths,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *SandboxPolicy) Reset() {
@@ -1804,6 +1805,13 @@ func (x *SandboxPolicy) GetAdditionalReadPaths() []string {
 		return x.AdditionalReadPaths
 	}
 	return nil
+}
+
+func (x *SandboxPolicy) GetAllowUserOverrideReadPaths() bool {
+	if x != nil && x.AllowUserOverrideReadPaths != nil {
+		return *x.AllowUserOverrideReadPaths
+	}
+	return false
 }
 
 type NetworkPolicy struct {
@@ -3554,6 +3562,7 @@ type ReadArgs struct {
 	Limit         *uint32                `protobuf:"varint,5,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
 	EncodingHint  *string                `protobuf:"bytes,6,opt,name=encoding_hint,json=encodingHint,proto3,oneof" json:"encoding_hint,omitempty"`
 	DigestOnly    *bool                  `protobuf:"varint,7,opt,name=digest_only,json=digestOnly,proto3,oneof" json:"digest_only,omitempty"`
+	MaxChars      *uint32                `protobuf:"varint,8,opt,name=max_chars,json=maxChars,proto3,oneof" json:"max_chars,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3628,6 +3637,13 @@ func (x *ReadArgs) GetDigestOnly() bool {
 		return *x.DigestOnly
 	}
 	return false
+}
+
+func (x *ReadArgs) GetMaxChars() uint32 {
+	if x != nil && x.MaxChars != nil {
+		return *x.MaxChars
+	}
+	return 0
 }
 
 type LsDirectoryTreeNode_File struct {
@@ -3852,7 +3868,8 @@ const file_agent_v1_exec_proto_rawDesc = "" +
 	"\acommand\x18\x02 \x01(\tH\x01R\acommand\x88\x01\x01B\x11\n" +
 	"\x0f_sandbox_policyB\n" +
 	"\n" +
-	"\b_command\"\xdb\t\n" +
+	"\b_command\"\xc7\n" +
+	"\n" +
 	"\rSandboxPolicy\x120\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x1c.agent.v1.SandboxPolicy.TypeR\x04type\x12*\n" +
 	"\x0enetwork_access\x18\x02 \x01(\bH\x00R\rnetworkAccess\x88\x01\x01\x12<\n" +
@@ -3868,7 +3885,8 @@ const file_agent_v1_exec_proto_rawDesc = "" +
 	"\x0ecapture_denies\x18\f \x01(\bH\aR\rcaptureDenies\x88\x01\x01\x127\n" +
 	"\x15skip_statsig_defaults\x18\r \x01(\bH\bR\x13skipStatsigDefaults\x88\x01\x01\x12M\n" +
 	"\rread_boundary\x18\x0e \x01(\x0e2(.agent.v1.SandboxPolicy.ReadBoundaryModeR\freadBoundary\x122\n" +
-	"\x15additional_read_paths\x18\x0f \x03(\tR\x13additionalReadPaths\"w\n" +
+	"\x15additional_read_paths\x18\x0f \x03(\tR\x13additionalReadPaths\x12G\n" +
+	"\x1eallow_user_override_read_paths\x18\x10 \x01(\bH\tR\x1aallowUserOverrideReadPaths\x88\x01\x01\"w\n" +
 	"\x10ReadBoundaryMode\x12\"\n" +
 	"\x1eREAD_BOUNDARY_MODE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19READ_BOUNDARY_MODE_SYSTEM\x10\x01\x12 \n" +
@@ -3886,7 +3904,8 @@ const file_agent_v1_exec_proto_rawDesc = "" +
 	"\x0f_network_policyB\x18\n" +
 	"\x16_network_policy_strictB\x11\n" +
 	"\x0f_capture_deniesB\x18\n" +
-	"\x16_skip_statsig_defaults\"\xff\x02\n" +
+	"\x16_skip_statsig_defaultsB!\n" +
+	"\x1f_allow_user_override_read_paths\"\xff\x02\n" +
 	"\rNetworkPolicy\x12\x1d\n" +
 	"\aversion\x18\x01 \x01(\rH\x00R\aversion\x88\x01\x01\x12Q\n" +
 	"\x0edefault_action\x18\x02 \x01(\x0e2%.agent.v1.NetworkPolicy.DefaultActionH\x01R\rdefaultAction\x88\x01\x01\x12\x12\n" +
@@ -4051,7 +4070,7 @@ const file_agent_v1_exec_proto_rawDesc = "" +
 	"\x06ignore\x18\x02 \x03(\tR\x06ignore\x12\"\n" +
 	"\n" +
 	"timeout_ms\x18\x05 \x01(\rH\x00R\ttimeoutMs\x88\x01\x01B\r\n" +
-	"\v_timeout_ms\"\xff\x01\n" +
+	"\v_timeout_ms\"\xaf\x02\n" +
 	"\bReadArgs\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12 \n" +
 	"\ftool_call_id\x18\x02 \x01(\tR\n" +
@@ -4060,11 +4079,14 @@ const file_agent_v1_exec_proto_rawDesc = "" +
 	"\x05limit\x18\x05 \x01(\rH\x01R\x05limit\x88\x01\x01\x12(\n" +
 	"\rencoding_hint\x18\x06 \x01(\tH\x02R\fencodingHint\x88\x01\x01\x12$\n" +
 	"\vdigest_only\x18\a \x01(\bH\x03R\n" +
-	"digestOnly\x88\x01\x01B\t\n" +
+	"digestOnly\x88\x01\x01\x12 \n" +
+	"\tmax_chars\x18\b \x01(\rH\x04R\bmaxChars\x88\x01\x01B\t\n" +
 	"\a_offsetB\b\n" +
 	"\x06_limitB\x10\n" +
 	"\x0e_encoding_hintB\x0e\n" +
-	"\f_digest_only*\x8f\x01\n" +
+	"\f_digest_onlyB\f\n" +
+	"\n" +
+	"_max_chars*\x8f\x01\n" +
 	"\x15ShellBackgroundReason\x12'\n" +
 	"#SHELL_BACKGROUND_REASON_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fSHELL_BACKGROUND_REASON_TIMEOUT\x10\x01\x12(\n" +

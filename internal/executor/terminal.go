@@ -198,7 +198,7 @@ func decodeTerminalText(b []byte, hint string) (string, error) {
 			end = i
 		}
 	}
-	body, err := decodeText(b[start:end], hint)
+	body, _, err := decodeText(b[start:end], hint)
 	if err != nil {
 		return "", err
 	}

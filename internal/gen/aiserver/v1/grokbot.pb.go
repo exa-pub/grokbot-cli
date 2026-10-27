@@ -150,6 +150,7 @@ type GetMeResponse struct {
 	HasActiveMobileSession                   *bool                  `protobuf:"varint,18,opt,name=has_active_mobile_session,json=hasActiveMobileSession,proto3,oneof" json:"has_active_mobile_session,omitempty"`
 	PublicUserId                             *string                `protobuf:"bytes,19,opt,name=public_user_id,json=publicUserId,proto3,oneof" json:"public_user_id,omitempty"`
 	ScmOnlyRestricted                        *bool                  `protobuf:"varint,20,opt,name=scm_only_restricted,json=scmOnlyRestricted,proto3,oneof" json:"scm_only_restricted,omitempty"`
+	EmailIsSynthetic                         *bool                  `protobuf:"varint,21,opt,name=email_is_synthetic,json=emailIsSynthetic,proto3,oneof" json:"email_is_synthetic,omitempty"`
 	unknownFields                            protoimpl.UnknownFields
 	sizeCache                                protoimpl.SizeCache
 }
@@ -320,6 +321,13 @@ func (x *GetMeResponse) GetPublicUserId() string {
 func (x *GetMeResponse) GetScmOnlyRestricted() bool {
 	if x != nil && x.ScmOnlyRestricted != nil {
 		return *x.ScmOnlyRestricted
+	}
+	return false
+}
+
+func (x *GetMeResponse) GetEmailIsSynthetic() bool {
+	if x != nil && x.EmailIsSynthetic != nil {
+		return *x.EmailIsSynthetic
 	}
 	return false
 }
@@ -1829,12 +1837,14 @@ func (x *GrokBotUserComputerLocalToolCall) GetConversationId() string {
 }
 
 type GrokBotUserComputerMessagesOp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OpJson        string                 `protobuf:"bytes,1,opt,name=op_json,json=opJson,proto3" json:"op_json,omitempty"`
-	ApprovalId    *string                `protobuf:"bytes,2,opt,name=approval_id,json=approvalId,proto3,oneof" json:"approval_id,omitempty"`
-	SendKey       *string                `protobuf:"bytes,3,opt,name=send_key,json=sendKey,proto3,oneof" json:"send_key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	OpJson               string                 `protobuf:"bytes,1,opt,name=op_json,json=opJson,proto3" json:"op_json,omitempty"`
+	ApprovalId           *string                `protobuf:"bytes,2,opt,name=approval_id,json=approvalId,proto3,oneof" json:"approval_id,omitempty"`
+	SendKey              *string                `protobuf:"bytes,3,opt,name=send_key,json=sendKey,proto3,oneof" json:"send_key,omitempty"`
+	DraftCard            *bool                  `protobuf:"varint,4,opt,name=draft_card,json=draftCard,proto3,oneof" json:"draft_card,omitempty"`
+	AuthorizedByApproval bool                   `protobuf:"varint,5,opt,name=authorized_by_approval,json=authorizedByApproval,proto3" json:"authorized_by_approval,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *GrokBotUserComputerMessagesOp) Reset() {
@@ -1886,6 +1896,20 @@ func (x *GrokBotUserComputerMessagesOp) GetSendKey() string {
 		return *x.SendKey
 	}
 	return ""
+}
+
+func (x *GrokBotUserComputerMessagesOp) GetDraftCard() bool {
+	if x != nil && x.DraftCard != nil {
+		return *x.DraftCard
+	}
+	return false
+}
+
+func (x *GrokBotUserComputerMessagesOp) GetAuthorizedByApproval() bool {
+	if x != nil {
+		return x.AuthorizedByApproval
+	}
+	return false
 }
 
 type GrokBotUserComputerCancel struct {
@@ -2478,6 +2502,7 @@ type WatchGrokBotUserComputerRequestsRequest struct {
 	MachineId     string                    `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
 	Credential    string                    `protobuf:"bytes,2,opt,name=credential,proto3" json:"credential,omitempty"`
 	Hello         *GrokBotUserComputerHello `protobuf:"bytes,3,opt,name=hello,proto3" json:"hello,omitempty"`
+	PresenceToken string                    `protobuf:"bytes,4,opt,name=presence_token,json=presenceToken,proto3" json:"presence_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2531,6 +2556,13 @@ func (x *WatchGrokBotUserComputerRequestsRequest) GetHello() *GrokBotUserCompute
 		return x.Hello
 	}
 	return nil
+}
+
+func (x *WatchGrokBotUserComputerRequestsRequest) GetPresenceToken() string {
+	if x != nil {
+		return x.PresenceToken
+	}
+	return ""
 }
 
 type GrokBotUserComputerHello struct {
@@ -2801,6 +2833,110 @@ func (x *GrokBotUserComputerLocalTool) GetState() string {
 	return ""
 }
 
+type WithdrawGrokBotUserComputerPresenceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Withdrawn     bool                   `protobuf:"varint,1,opt,name=withdrawn,proto3" json:"withdrawn,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WithdrawGrokBotUserComputerPresenceResponse) Reset() {
+	*x = WithdrawGrokBotUserComputerPresenceResponse{}
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WithdrawGrokBotUserComputerPresenceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WithdrawGrokBotUserComputerPresenceResponse) ProtoMessage() {}
+
+func (x *WithdrawGrokBotUserComputerPresenceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WithdrawGrokBotUserComputerPresenceResponse.ProtoReflect.Descriptor instead.
+func (*WithdrawGrokBotUserComputerPresenceResponse) Descriptor() ([]byte, []int) {
+	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *WithdrawGrokBotUserComputerPresenceResponse) GetWithdrawn() bool {
+	if x != nil {
+		return x.Withdrawn
+	}
+	return false
+}
+
+type WithdrawGrokBotUserComputerPresenceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MachineId     string                 `protobuf:"bytes,1,opt,name=machine_id,json=machineId,proto3" json:"machine_id,omitempty"`
+	Credential    string                 `protobuf:"bytes,2,opt,name=credential,proto3" json:"credential,omitempty"`
+	PresenceToken string                 `protobuf:"bytes,3,opt,name=presence_token,json=presenceToken,proto3" json:"presence_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WithdrawGrokBotUserComputerPresenceRequest) Reset() {
+	*x = WithdrawGrokBotUserComputerPresenceRequest{}
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WithdrawGrokBotUserComputerPresenceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WithdrawGrokBotUserComputerPresenceRequest) ProtoMessage() {}
+
+func (x *WithdrawGrokBotUserComputerPresenceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WithdrawGrokBotUserComputerPresenceRequest.ProtoReflect.Descriptor instead.
+func (*WithdrawGrokBotUserComputerPresenceRequest) Descriptor() ([]byte, []int) {
+	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *WithdrawGrokBotUserComputerPresenceRequest) GetMachineId() string {
+	if x != nil {
+		return x.MachineId
+	}
+	return ""
+}
+
+func (x *WithdrawGrokBotUserComputerPresenceRequest) GetCredential() string {
+	if x != nil {
+		return x.Credential
+	}
+	return ""
+}
+
+func (x *WithdrawGrokBotUserComputerPresenceRequest) GetPresenceToken() string {
+	if x != nil {
+		return x.PresenceToken
+	}
+	return ""
+}
+
 type IssueGrokBotUserComputerCredentialResponse struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	Credential          string                 `protobuf:"bytes,1,opt,name=credential,proto3" json:"credential,omitempty"`
@@ -2812,7 +2948,7 @@ type IssueGrokBotUserComputerCredentialResponse struct {
 
 func (x *IssueGrokBotUserComputerCredentialResponse) Reset() {
 	*x = IssueGrokBotUserComputerCredentialResponse{}
-	mi := &file_aiserver_v1_grokbot_proto_msgTypes[38]
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2824,7 +2960,7 @@ func (x *IssueGrokBotUserComputerCredentialResponse) String() string {
 func (*IssueGrokBotUserComputerCredentialResponse) ProtoMessage() {}
 
 func (x *IssueGrokBotUserComputerCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aiserver_v1_grokbot_proto_msgTypes[38]
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2837,7 +2973,7 @@ func (x *IssueGrokBotUserComputerCredentialResponse) ProtoReflect() protoreflect
 
 // Deprecated: Use IssueGrokBotUserComputerCredentialResponse.ProtoReflect.Descriptor instead.
 func (*IssueGrokBotUserComputerCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{38}
+	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *IssueGrokBotUserComputerCredentialResponse) GetCredential() string {
@@ -2871,7 +3007,7 @@ type IssueGrokBotUserComputerCredentialRequest struct {
 
 func (x *IssueGrokBotUserComputerCredentialRequest) Reset() {
 	*x = IssueGrokBotUserComputerCredentialRequest{}
-	mi := &file_aiserver_v1_grokbot_proto_msgTypes[39]
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2883,7 +3019,7 @@ func (x *IssueGrokBotUserComputerCredentialRequest) String() string {
 func (*IssueGrokBotUserComputerCredentialRequest) ProtoMessage() {}
 
 func (x *IssueGrokBotUserComputerCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aiserver_v1_grokbot_proto_msgTypes[39]
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2896,7 +3032,7 @@ func (x *IssueGrokBotUserComputerCredentialRequest) ProtoReflect() protoreflect.
 
 // Deprecated: Use IssueGrokBotUserComputerCredentialRequest.ProtoReflect.Descriptor instead.
 func (*IssueGrokBotUserComputerCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{39}
+	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *IssueGrokBotUserComputerCredentialRequest) GetMachineId() string {
@@ -2923,7 +3059,7 @@ type GetUserPrivacyModeRequest struct {
 
 func (x *GetUserPrivacyModeRequest) Reset() {
 	*x = GetUserPrivacyModeRequest{}
-	mi := &file_aiserver_v1_grokbot_proto_msgTypes[40]
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2935,7 +3071,7 @@ func (x *GetUserPrivacyModeRequest) String() string {
 func (*GetUserPrivacyModeRequest) ProtoMessage() {}
 
 func (x *GetUserPrivacyModeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_aiserver_v1_grokbot_proto_msgTypes[40]
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2948,7 +3084,7 @@ func (x *GetUserPrivacyModeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserPrivacyModeRequest.ProtoReflect.Descriptor instead.
 func (*GetUserPrivacyModeRequest) Descriptor() ([]byte, []int) {
-	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{40}
+	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *GetUserPrivacyModeRequest) GetInferredPrivacyMode() PrivacyMode {
@@ -2980,7 +3116,7 @@ type GetUserPrivacyModeResponse struct {
 
 func (x *GetUserPrivacyModeResponse) Reset() {
 	*x = GetUserPrivacyModeResponse{}
-	mi := &file_aiserver_v1_grokbot_proto_msgTypes[41]
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2992,7 +3128,7 @@ func (x *GetUserPrivacyModeResponse) String() string {
 func (*GetUserPrivacyModeResponse) ProtoMessage() {}
 
 func (x *GetUserPrivacyModeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_aiserver_v1_grokbot_proto_msgTypes[41]
+	mi := &file_aiserver_v1_grokbot_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3005,7 +3141,7 @@ func (x *GetUserPrivacyModeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUserPrivacyModeResponse.ProtoReflect.Descriptor instead.
 func (*GetUserPrivacyModeResponse) Descriptor() ([]byte, []int) {
-	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{41}
+	return file_aiserver_v1_grokbot_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *GetUserPrivacyModeResponse) GetPrivacyMode() PrivacyMode {
@@ -3061,7 +3197,8 @@ var File_aiserver_v1_grokbot_proto protoreflect.FileDescriptor
 
 const file_aiserver_v1_grokbot_proto_rawDesc = "" +
 	"\n" +
-	"\x19aiserver/v1/grokbot.proto\x12\vaiserver.v1\"\xe5\t\n" +
+	"\x19aiserver/v1/grokbot.proto\x12\vaiserver.v1\"\xaf\n" +
+	"\n" +
 	"\rGetMeResponse\x12\x17\n" +
 	"\aauth_id\x18\x01 \x01(\tR\x06authId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\x05R\x06userId\x12\x19\n" +
@@ -3086,7 +3223,8 @@ const file_aiserver_v1_grokbot_proto_rawDesc = "" +
 	"\ris_team_admin\x18\x11 \x01(\bH\x0eR\visTeamAdmin\x88\x01\x01\x12>\n" +
 	"\x19has_active_mobile_session\x18\x12 \x01(\bH\x0fR\x16hasActiveMobileSession\x88\x01\x01\x12)\n" +
 	"\x0epublic_user_id\x18\x13 \x01(\tH\x10R\fpublicUserId\x88\x01\x01\x123\n" +
-	"\x13scm_only_restricted\x18\x14 \x01(\bH\x11R\x11scmOnlyRestricted\x88\x01\x01B\b\n" +
+	"\x13scm_only_restricted\x18\x14 \x01(\bH\x11R\x11scmOnlyRestricted\x88\x01\x01\x121\n" +
+	"\x12email_is_synthetic\x18\x15 \x01(\bH\x12R\x10emailIsSynthetic\x88\x01\x01B\b\n" +
 	"\x06_emailB\r\n" +
 	"\v_first_nameB\f\n" +
 	"\n" +
@@ -3109,7 +3247,8 @@ const file_aiserver_v1_grokbot_proto_rawDesc = "" +
 	"\x0e_is_team_adminB\x1c\n" +
 	"\x1a_has_active_mobile_sessionB\x11\n" +
 	"\x0f_public_user_idB\x16\n" +
-	"\x14_scm_only_restricted\"\xe6\x01\n" +
+	"\x14_scm_only_restrictedB\x15\n" +
+	"\x13_email_is_synthetic\"\xe6\x01\n" +
 	"\fGetMeRequest\x12\x1c\n" +
 	"\ateam_id\x18\x01 \x01(\x05H\x00R\x06teamId\x88\x01\x01\x125\n" +
 	"\x14source_site_hostname\x18\x02 \x01(\tH\x01R\x12sourceSiteHostname\x88\x01\x01\x12>\n" +
@@ -3232,14 +3371,18 @@ const file_aiserver_v1_grokbot_proto_rawDesc = "" +
 	"\vapproval_id\x18\x03 \x01(\tH\x00R\n" +
 	"approvalId\x88\x01\x01\x12'\n" +
 	"\x0fconversation_id\x18\x04 \x01(\tR\x0econversationIdB\x0e\n" +
-	"\f_approval_id\"\x9b\x01\n" +
+	"\f_approval_id\"\x84\x02\n" +
 	"\x1dGrokBotUserComputerMessagesOp\x12\x17\n" +
 	"\aop_json\x18\x01 \x01(\tR\x06opJson\x12$\n" +
 	"\vapproval_id\x18\x02 \x01(\tH\x00R\n" +
 	"approvalId\x88\x01\x01\x12\x1e\n" +
-	"\bsend_key\x18\x03 \x01(\tH\x01R\asendKey\x88\x01\x01B\x0e\n" +
+	"\bsend_key\x18\x03 \x01(\tH\x01R\asendKey\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"draft_card\x18\x04 \x01(\bH\x02R\tdraftCard\x88\x01\x01\x124\n" +
+	"\x16authorized_by_approval\x18\x05 \x01(\bR\x14authorizedByApprovalB\x0e\n" +
 	"\f_approval_idB\v\n" +
-	"\t_send_key\"\x1b\n" +
+	"\t_send_keyB\r\n" +
+	"\v_draft_card\"\x1b\n" +
 	"\x19GrokBotUserComputerCancel\"D\n" +
 	"!GrokBotUserComputerRetireApproval\x12\x1f\n" +
 	"\vapproval_id\x18\x01 \x01(\tR\n" +
@@ -3283,14 +3426,15 @@ const file_aiserver_v1_grokbot_proto_rawDesc = "" +
 	"\x15pending_request_count\x18\x01 \x01(\rR\x13pendingRequestCount\" \n" +
 	"\x1eWatchGrokBotUserComputerNotify\"W\n" +
 	"!WatchGrokBotUserComputerConnected\x122\n" +
-	"\x15pending_request_count\x18\x01 \x01(\rR\x13pendingRequestCount\"\xa5\x01\n" +
+	"\x15pending_request_count\x18\x01 \x01(\rR\x13pendingRequestCount\"\xcc\x01\n" +
 	"'WatchGrokBotUserComputerRequestsRequest\x12\x1d\n" +
 	"\n" +
 	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x02 \x01(\tR\n" +
 	"credential\x12;\n" +
-	"\x05hello\x18\x03 \x01(\v2%.aiserver.v1.GrokBotUserComputerHelloR\x05hello\"\xe9\x02\n" +
+	"\x05hello\x18\x03 \x01(\v2%.aiserver.v1.GrokBotUserComputerHelloR\x05hello\x12%\n" +
+	"\x0epresence_token\x18\x04 \x01(\tR\rpresenceToken\"\xe9\x02\n" +
 	"\x18GrokBotUserComputerHello\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x1d\n" +
 	"\n" +
@@ -3326,7 +3470,16 @@ const file_aiserver_v1_grokbot_proto_rawDesc = "" +
 	"\x17_local_tool_helper_name\"M\n" +
 	"\x1cGrokBotUserComputerLocalTool\x12\x17\n" +
 	"\atool_id\x18\x01 \x01(\tR\x06toolId\x12\x14\n" +
-	"\x05state\x18\x02 \x01(\tR\x05state\"\xa3\x01\n" +
+	"\x05state\x18\x02 \x01(\tR\x05state\"K\n" +
+	"+WithdrawGrokBotUserComputerPresenceResponse\x12\x1c\n" +
+	"\twithdrawn\x18\x01 \x01(\bR\twithdrawn\"\x92\x01\n" +
+	"*WithdrawGrokBotUserComputerPresenceRequest\x12\x1d\n" +
+	"\n" +
+	"machine_id\x18\x01 \x01(\tR\tmachineId\x12\x1e\n" +
+	"\n" +
+	"credential\x18\x02 \x01(\tR\n" +
+	"credential\x12%\n" +
+	"\x0epresence_token\x18\x03 \x01(\tR\rpresenceToken\"\xa3\x01\n" +
 	"*IssueGrokBotUserComputerCredentialResponse\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x01 \x01(\tR\n" +
@@ -3363,12 +3516,13 @@ const file_aiserver_v1_grokbot_proto_rawDesc = "" +
 	"\x17PRIVACY_MODE_NO_STORAGE\x10\x01\x12\x1c\n" +
 	"\x18PRIVACY_MODE_NO_TRAINING\x10\x02\x12,\n" +
 	"(PRIVACY_MODE_USAGE_DATA_TRAINING_ALLOWED\x10\x03\x120\n" +
-	",PRIVACY_MODE_USAGE_CODEBASE_TRAINING_ALLOWED\x10\x042\xe0\x04\n" +
+	",PRIVACY_MODE_USAGE_CODEBASE_TRAINING_ALLOWED\x10\x042\xfb\x05\n" +
 	"\x0eGrokBotService\x12\x95\x01\n" +
 	"\"IssueGrokBotUserComputerCredential\x126.aiserver.v1.IssueGrokBotUserComputerCredentialRequest\x1a7.aiserver.v1.IssueGrokBotUserComputerCredentialResponse\x12\x8e\x01\n" +
 	" WatchGrokBotUserComputerRequests\x124.aiserver.v1.WatchGrokBotUserComputerRequestsRequest\x1a2.aiserver.v1.WatchGrokBotUserComputerRequestsEvent0\x01\x12\x8c\x01\n" +
 	"\x1fPollGrokBotUserComputerRequests\x123.aiserver.v1.PollGrokBotUserComputerRequestsRequest\x1a4.aiserver.v1.PollGrokBotUserComputerRequestsResponse\x12\x95\x01\n" +
-	"\"SubmitGrokBotUserComputerResponses\x126.aiserver.v1.SubmitGrokBotUserComputerResponsesRequest\x1a7.aiserver.v1.SubmitGrokBotUserComputerResponsesResponse2\xa3\x02\n" +
+	"\"SubmitGrokBotUserComputerResponses\x126.aiserver.v1.SubmitGrokBotUserComputerResponsesRequest\x1a7.aiserver.v1.SubmitGrokBotUserComputerResponsesResponse\x12\x98\x01\n" +
+	"#WithdrawGrokBotUserComputerPresence\x127.aiserver.v1.WithdrawGrokBotUserComputerPresenceRequest\x1a8.aiserver.v1.WithdrawGrokBotUserComputerPresenceResponse2\xa3\x02\n" +
 	"\x10DashboardService\x12e\n" +
 	"\x12GetUserPrivacyMode\x12&.aiserver.v1.GetUserPrivacyModeRequest\x1a'.aiserver.v1.GetUserPrivacyModeResponse\x12>\n" +
 	"\x05GetMe\x12\x19.aiserver.v1.GetMeRequest\x1a\x1a.aiserver.v1.GetMeResponse\x12h\n" +
@@ -3387,7 +3541,7 @@ func file_aiserver_v1_grokbot_proto_rawDescGZIP() []byte {
 }
 
 var file_aiserver_v1_grokbot_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_aiserver_v1_grokbot_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_aiserver_v1_grokbot_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_aiserver_v1_grokbot_proto_goTypes = []any{
 	(GrokBotUserComputerMessagesConsentVerdict)(0), // 0: aiserver.v1.GrokBotUserComputerMessagesConsentVerdict
 	(PrivacyMode)(0),                                      // 1: aiserver.v1.PrivacyMode
@@ -3429,10 +3583,12 @@ var file_aiserver_v1_grokbot_proto_goTypes = []any{
 	(*GrokBotUserComputerHello)(nil),                      // 37: aiserver.v1.GrokBotUserComputerHello
 	(*GrokBotUserComputerCapabilities)(nil),               // 38: aiserver.v1.GrokBotUserComputerCapabilities
 	(*GrokBotUserComputerLocalTool)(nil),                  // 39: aiserver.v1.GrokBotUserComputerLocalTool
-	(*IssueGrokBotUserComputerCredentialResponse)(nil),    // 40: aiserver.v1.IssueGrokBotUserComputerCredentialResponse
-	(*IssueGrokBotUserComputerCredentialRequest)(nil),     // 41: aiserver.v1.IssueGrokBotUserComputerCredentialRequest
-	(*GetUserPrivacyModeRequest)(nil),                     // 42: aiserver.v1.GetUserPrivacyModeRequest
-	(*GetUserPrivacyModeResponse)(nil),                    // 43: aiserver.v1.GetUserPrivacyModeResponse
+	(*WithdrawGrokBotUserComputerPresenceResponse)(nil),   // 40: aiserver.v1.WithdrawGrokBotUserComputerPresenceResponse
+	(*WithdrawGrokBotUserComputerPresenceRequest)(nil),    // 41: aiserver.v1.WithdrawGrokBotUserComputerPresenceRequest
+	(*IssueGrokBotUserComputerCredentialResponse)(nil),    // 42: aiserver.v1.IssueGrokBotUserComputerCredentialResponse
+	(*IssueGrokBotUserComputerCredentialRequest)(nil),     // 43: aiserver.v1.IssueGrokBotUserComputerCredentialRequest
+	(*GetUserPrivacyModeRequest)(nil),                     // 44: aiserver.v1.GetUserPrivacyModeRequest
+	(*GetUserPrivacyModeResponse)(nil),                    // 45: aiserver.v1.GetUserPrivacyModeResponse
 }
 var file_aiserver_v1_grokbot_proto_depIdxs = []int32{
 	8,  // 0: aiserver.v1.SubmitGrokBotUserComputerResponsesRequest.frames:type_name -> aiserver.v1.GrokBotUserComputerResponseFrame
@@ -3467,22 +3623,24 @@ var file_aiserver_v1_grokbot_proto_depIdxs = []int32{
 	1,  // 29: aiserver.v1.GetUserPrivacyModeRequest.inferred_privacy_mode:type_name -> aiserver.v1.PrivacyMode
 	1,  // 30: aiserver.v1.GetUserPrivacyModeResponse.privacy_mode:type_name -> aiserver.v1.PrivacyMode
 	1,  // 31: aiserver.v1.GetUserPrivacyModeResponse.account_privacy_mode:type_name -> aiserver.v1.PrivacyMode
-	41, // 32: aiserver.v1.GrokBotService.IssueGrokBotUserComputerCredential:input_type -> aiserver.v1.IssueGrokBotUserComputerCredentialRequest
+	43, // 32: aiserver.v1.GrokBotService.IssueGrokBotUserComputerCredential:input_type -> aiserver.v1.IssueGrokBotUserComputerCredentialRequest
 	36, // 33: aiserver.v1.GrokBotService.WatchGrokBotUserComputerRequests:input_type -> aiserver.v1.WatchGrokBotUserComputerRequestsRequest
 	31, // 34: aiserver.v1.GrokBotService.PollGrokBotUserComputerRequests:input_type -> aiserver.v1.PollGrokBotUserComputerRequestsRequest
 	7,  // 35: aiserver.v1.GrokBotService.SubmitGrokBotUserComputerResponses:input_type -> aiserver.v1.SubmitGrokBotUserComputerResponsesRequest
-	42, // 36: aiserver.v1.DashboardService.GetUserPrivacyMode:input_type -> aiserver.v1.GetUserPrivacyModeRequest
-	3,  // 37: aiserver.v1.DashboardService.GetMe:input_type -> aiserver.v1.GetMeRequest
-	5,  // 38: aiserver.v1.DashboardService.RegisterSandMachine:input_type -> aiserver.v1.RegisterSandMachineRequest
-	40, // 39: aiserver.v1.GrokBotService.IssueGrokBotUserComputerCredential:output_type -> aiserver.v1.IssueGrokBotUserComputerCredentialResponse
-	32, // 40: aiserver.v1.GrokBotService.WatchGrokBotUserComputerRequests:output_type -> aiserver.v1.WatchGrokBotUserComputerRequestsEvent
-	20, // 41: aiserver.v1.GrokBotService.PollGrokBotUserComputerRequests:output_type -> aiserver.v1.PollGrokBotUserComputerRequestsResponse
-	6,  // 42: aiserver.v1.GrokBotService.SubmitGrokBotUserComputerResponses:output_type -> aiserver.v1.SubmitGrokBotUserComputerResponsesResponse
-	43, // 43: aiserver.v1.DashboardService.GetUserPrivacyMode:output_type -> aiserver.v1.GetUserPrivacyModeResponse
-	2,  // 44: aiserver.v1.DashboardService.GetMe:output_type -> aiserver.v1.GetMeResponse
-	4,  // 45: aiserver.v1.DashboardService.RegisterSandMachine:output_type -> aiserver.v1.RegisterSandMachineResponse
-	39, // [39:46] is the sub-list for method output_type
-	32, // [32:39] is the sub-list for method input_type
+	41, // 36: aiserver.v1.GrokBotService.WithdrawGrokBotUserComputerPresence:input_type -> aiserver.v1.WithdrawGrokBotUserComputerPresenceRequest
+	44, // 37: aiserver.v1.DashboardService.GetUserPrivacyMode:input_type -> aiserver.v1.GetUserPrivacyModeRequest
+	3,  // 38: aiserver.v1.DashboardService.GetMe:input_type -> aiserver.v1.GetMeRequest
+	5,  // 39: aiserver.v1.DashboardService.RegisterSandMachine:input_type -> aiserver.v1.RegisterSandMachineRequest
+	42, // 40: aiserver.v1.GrokBotService.IssueGrokBotUserComputerCredential:output_type -> aiserver.v1.IssueGrokBotUserComputerCredentialResponse
+	32, // 41: aiserver.v1.GrokBotService.WatchGrokBotUserComputerRequests:output_type -> aiserver.v1.WatchGrokBotUserComputerRequestsEvent
+	20, // 42: aiserver.v1.GrokBotService.PollGrokBotUserComputerRequests:output_type -> aiserver.v1.PollGrokBotUserComputerRequestsResponse
+	6,  // 43: aiserver.v1.GrokBotService.SubmitGrokBotUserComputerResponses:output_type -> aiserver.v1.SubmitGrokBotUserComputerResponsesResponse
+	40, // 44: aiserver.v1.GrokBotService.WithdrawGrokBotUserComputerPresence:output_type -> aiserver.v1.WithdrawGrokBotUserComputerPresenceResponse
+	45, // 45: aiserver.v1.DashboardService.GetUserPrivacyMode:output_type -> aiserver.v1.GetUserPrivacyModeResponse
+	2,  // 46: aiserver.v1.DashboardService.GetMe:output_type -> aiserver.v1.GetMeResponse
+	4,  // 47: aiserver.v1.DashboardService.RegisterSandMachine:output_type -> aiserver.v1.RegisterSandMachineResponse
+	40, // [40:48] is the sub-list for method output_type
+	32, // [32:40] is the sub-list for method input_type
 	32, // [32:32] is the sub-list for extension type_name
 	32, // [32:32] is the sub-list for extension extendee
 	0,  // [0:32] is the sub-list for field type_name
@@ -3534,15 +3692,15 @@ func file_aiserver_v1_grokbot_proto_init() {
 		(*WatchGrokBotUserComputerRequestsEvent_Heartbeat)(nil),
 	}
 	file_aiserver_v1_grokbot_proto_msgTypes[36].OneofWrappers = []any{}
-	file_aiserver_v1_grokbot_proto_msgTypes[40].OneofWrappers = []any{}
-	file_aiserver_v1_grokbot_proto_msgTypes[41].OneofWrappers = []any{}
+	file_aiserver_v1_grokbot_proto_msgTypes[42].OneofWrappers = []any{}
+	file_aiserver_v1_grokbot_proto_msgTypes[43].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_aiserver_v1_grokbot_proto_rawDesc), len(file_aiserver_v1_grokbot_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   42,
+			NumMessages:   44,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

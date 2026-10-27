@@ -141,6 +141,7 @@ func (e *Executor) startShell(x *agentv1.ShellArgs, cwd string, st shellState, s
 	defer closeLogged(command)
 	user := userShell()
 	sh.cmd = shellCommand(user, st, cwd, user.args("-c", user.foregroundScript(), "grokbot-shell", sh.fallback.Name())...)
+	sh.cmd.Env = withGitConfig(sh.cmd.Env)
 	sh.cmd.ExtraFiles = []*os.File{replay, sh.snapshot, command}
 	// A new session detaches the command from the CLI's controlling terminal,
 	// as the desktop does: sudo, ssh or git fail instead of stopping on
