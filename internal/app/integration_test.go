@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -114,6 +115,32 @@ func (c *localCloud) SubmitGrokBotUserComputerResponses(ctx context.Context, r *
 	}
 	return connect.NewResponse(&aiserverv1.SubmitGrokBotUserComputerResponsesResponse{AcceptedCount: uint32(len(r.Msg.Frames))}), nil
 }
+
+// listenNotify points NOTIFY_SOCKET at a socket like systemd's for
+// Type=notify services.
+func listenNotify(t *testing.T) *net.UnixConn {
+	t.Helper()
+	addr := filepath.Join(t.TempDir(), "notify")
+	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: addr, Net: "unixgram"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	t.Setenv("NOTIFY_SOCKET", addr)
+	return conn
+}
+
+func readNotify(t *testing.T, conn *net.UnixConn) string {
+	t.Helper()
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(buf[:n])
+}
+
 func TestLoginConnectEndToEndLocal(t *testing.T) {
 	home := t.TempDir()
 	root := t.TempDir()
@@ -143,6 +170,7 @@ func TestLoginConnectEndToEndLocal(t *testing.T) {
 	if !strings.Contains(out.String(), "Logged in as test@example.invalid") {
 		t.Fatal(out.String())
 	}
+	notifications := listenNotify(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -152,6 +180,9 @@ func TestLoginConnectEndToEndLocal(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("local cloud requests did not complete")
 	}
+	if got := readNotify(t, notifications); got != "READY=1" {
+		t.Fatal("systemd notification", got)
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -160,6 +191,9 @@ func TestLoginConnectEndToEndLocal(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("graceful shutdown failed")
+	}
+	if got := readNotify(t, notifications); got != "STOPPING=1" {
+		t.Fatal("systemd notification", got)
 	}
 	b, err := os.ReadFile(filepath.Join(root, "uploaded"))
 	if err != nil || string(b) != "upload-ok" {

@@ -57,3 +57,38 @@ func TestLockExcludesOtherHolders(t *testing.T) {
 	}
 	again()
 }
+
+func TestMachineRecordsHost(t *testing.T) {
+	id := filepath.Join(t.TempDir(), "machine-id")
+	os.WriteFile(id, []byte("abc123\n"), 0o644)
+	old := machineIDPath
+	machineIDPath = id
+	t.Cleanup(func() { machineIDPath = old })
+
+	s := &Store{Dir: filepath.Join(t.TempDir(), "store")}
+	m, err := s.Machine()
+	if err != nil || m.HostID != "abc123" {
+		t.Fatal(m, err)
+	}
+	// Identities saved before host_id existed get the current host's.
+	if err = s.Save("machine", Machine{MachineID: m.MachineID, Label: "box"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err = s.Machine()
+	if err != nil || m.HostID != "abc123" || m.Label != "box" {
+		t.Fatal(m, err)
+	}
+	var saved Machine
+	if err = s.Load("machine", &saved); err != nil || saved != m {
+		t.Fatal(saved, err)
+	}
+	// A copied store keeps the host it was created on.
+	os.WriteFile(id, []byte("other\n"), 0o644)
+	if m, err = s.Machine(); err != nil || m.HostID != "abc123" || HostID() != "other" {
+		t.Fatal(m, err)
+	}
+	os.Remove(id)
+	if HostID() != "" {
+		t.Fatal(HostID())
+	}
+}
