@@ -39,6 +39,26 @@ const (
 
 var errOutsideRoot = errors.New("path is outside the allowed local-exec root")
 
+// ErrUnknownFrame answers a request frame the desktop does not parse, in its
+// words.
+//
+//nolint:revive,staticcheck // user-facing sentence
+var ErrUnknownFrame = errors.New("This computer's local-exec daemon does not understand that request frame; update the desktop app.")
+
+// Unrecognized reports whether f is a request the desktop answers with
+// ErrUnknownFrame before scheduling it: a frame of no known type, a URL
+// transfer (put/get file to/from URL, which neither advertises) or AI tool
+// discovery for an unknown source.
+func Unrecognized(f *aiserverv1.GrokBotUserComputerRequestFrame) bool {
+	switch v := f.Frame.(type) {
+	case nil, *aiserverv1.GrokBotUserComputerRequestFrame_PutFileToUrl, *aiserverv1.GrokBotUserComputerRequestFrame_GetFileFromUrl:
+		return true
+	case *aiserverv1.GrokBotUserComputerRequestFrame_DiscoverAiTool:
+		return v.DiscoverAiTool.Source != sourceCodex && v.DiscoverAiTool.Source != sourceClaudeCode
+	}
+	return false
+}
+
 // fileTooLarge refuses a file of size bytes in the desktop's words.
 func fileTooLarge(size int64) error {
 	mib := func(n int64) string { return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20)) }
@@ -147,7 +167,7 @@ func (e *Executor) cwd(path string) (dir, warning string, err error) {
 func Reject(f *aiserverv1.GrokBotUserComputerRequestFrame, err error, sink Sink) error {
 	resp := &aiserverv1.GrokBotUserComputerResponseFrame{RequestId: f.RequestId}
 	switch {
-	case f.GetExec() != nil:
+	case f.GetExec() != nil, f.Frame == nil, f.GetPutFileToUrl() != nil, f.GetGetFileFromUrl() != nil:
 		return sendControl(f.RequestId, throwMessage(0, err), nil, sink)
 	case f.GetMessagesOp() != nil:
 		resp.Frame = &aiserverv1.GrokBotUserComputerResponseFrame_MessagesError{
@@ -207,6 +227,9 @@ type authorization interface {
 
 func parse(f *aiserverv1.GrokBotUserComputerRequestFrame) (request, error) {
 	r := request{msg: &agentv1.ExecServerMessage{}}
+	if Unrecognized(f) {
+		return r, ErrUnknownFrame
+	}
 	var auth authorization
 	switch v := f.Frame.(type) {
 	case *aiserverv1.GrokBotUserComputerRequestFrame_Exec:
@@ -221,11 +244,8 @@ func parse(f *aiserverv1.GrokBotUserComputerRequestFrame) (request, error) {
 		r.action = "Write " + v.Upload.Path
 		auth = v.Upload
 	case *aiserverv1.GrokBotUserComputerRequestFrame_DiscoverAiTool:
-		source := v.DiscoverAiTool.Source
-		if source != sourceCodex && source != sourceClaudeCode {
-			return r, errUnsupportedSource
-		}
-		r.action = "Read AI tool setup and recent history for " + source + " in the home/config directories (may be outside root)"
+		r.action = "Read AI tool setup and recent history for " + v.DiscoverAiTool.Source +
+			" in the home/config directories (may be outside root)"
 		auth = v.DiscoverAiTool
 	case *aiserverv1.GrokBotUserComputerRequestFrame_Download:
 		r.action = "Read " + v.Download.Path
