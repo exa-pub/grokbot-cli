@@ -62,7 +62,12 @@ message GrokBotUserComputerResponseFrame {
     .aiserver.v1.GrokBotUserComputerLocalToolAccepted local_tool_accepted = 10;
     .aiserver.v1.GrokBotUserComputerLocalToolResult local_tool_result = 11;
     .aiserver.v1.GrokBotUserComputerLocalToolPermissionPending local_tool_permission_pending = 12;
+    .aiserver.v1.GrokBotUserComputerUrlTransfer url_transfer = 13;
   }
+}
+message GrokBotUserComputerUrlTransfer {
+  string sha256 = 1;
+  uint64 size_bytes = 2;
 }
 message GrokBotUserComputerLocalToolPermissionPending {
   string reason = 1;
@@ -130,7 +135,26 @@ message GrokBotUserComputerRequestFrame {
     .aiserver.v1.GrokBotUserComputerMessagesOp messages_op = 7;
     .aiserver.v1.GrokBotUserComputerLocalToolCall local_tool = 9;
     .aiserver.v1.GrokBotUserComputerDiscoverAiTool discover_ai_tool = 12;
+    .aiserver.v1.GrokBotUserComputerPutFileToUrl put_file_to_url = 13;
+    .aiserver.v1.GrokBotUserComputerGetFileFromUrl get_file_from_url = 14;
   }
+}
+message GrokBotUserComputerGetFileFromUrl {
+  string path = 1;
+  string url = 2;
+  string sha256 = 3;
+  uint64 size_bytes = 4;
+  optional string approval_id = 5;
+  bool authorized_by_standing = 6;
+  bool authorized_by_approval = 7;
+}
+message GrokBotUserComputerPutFileToUrl {
+  string path = 1;
+  string url = 2;
+  map<string, string> headers = 3;
+  optional string approval_id = 4;
+  bool authorized_by_standing = 5;
+  bool authorized_by_approval = 6;
 }
 message GrokBotUserComputerDiscoverAiTool {
   string source = 1;
@@ -143,6 +167,11 @@ message GrokBotUserComputerLocalToolCall {
   string input_json = 2;
   optional string approval_id = 3;
   string conversation_id = 4;
+  repeated .aiserver.v1.GrokBotUserComputerImageUpload image_uploads = 5;
+}
+message GrokBotUserComputerImageUpload {
+  string url = 1;
+  map<string, string> headers = 2;
 }
 message GrokBotUserComputerMessagesOp {
   string op_json = 1;
@@ -223,10 +252,14 @@ message GrokBotUserComputerCapabilities {
   optional bool local_tool_app_consent = 8;
   optional bool local_tool_grant_seen = 9;
   optional string local_tool_helper_name = 10;
+  optional bool url_file_transfer = 11;
+  optional bool local_tool_image_uploads = 12;
 }
 message GrokBotUserComputerLocalTool {
   string tool_id = 1;
   string state = 2;
+  repeated string data_types = 3;
+  repeated string features = 4;
 }
 message WithdrawGrokBotUserComputerPresenceResponse {
   bool withdrawn = 1;

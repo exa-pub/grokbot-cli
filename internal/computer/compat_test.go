@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -656,5 +657,23 @@ func TestStaleSubmitResultKeepsNewCredential(t *testing.T) {
 	}
 	if s.credential.Credential != "new" || len(s.pending) != 1 {
 		t.Fatal("rejection of the old credential dropped the new one")
+	}
+}
+
+func TestUnrecognizedFrameAnsweredWhenBusy(t *testing.T) {
+	s := testSession(t)
+	s.active = maxActive
+	s.backlog = make([]string, maxBacklog)
+	s.accept(&requestFrame{RequestId: "url", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_PutFileToUrl{PutFileToUrl: &aiserverv1.GrokBotUserComputerPutFileToUrl{}}}, false)
+	if len(s.tasks) != 0 || len(s.pending) != 1 || !closes(s.pending[0]) || !strings.Contains(s.pending[0].GetControl().GetMessageJson(), "does not understand that request frame") {
+		t.Fatal(s.tasks, s.pending)
+	}
+	s.accept(&requestFrame{RequestId: "url", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_PutFileToUrl{PutFileToUrl: &aiserverv1.GrokBotUserComputerPutFileToUrl{}}}, false)
+	if len(s.pending) != 1 {
+		t.Fatal("repeated delivery answered twice")
+	}
+	s.accept(&requestFrame{}, false)
+	if len(s.pending) != 1 {
+		t.Fatal("frame without a request id answered")
 	}
 }

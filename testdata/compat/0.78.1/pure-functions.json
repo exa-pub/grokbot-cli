@@ -1,16 +1,16 @@
 {
   "provenance": {
-    "version": "0.77.0",
+    "version": "0.78.1",
     "platform": "linux",
     "method": "isolated pure functions from source; not desktop traffic",
     "source": "local-exec-daemon/main.cjs",
     "markers": [
-      "J2r",
-      "v_e",
-      "ude",
-      "GO",
-      "Pat",
-      "__e"
+      "QSr",
+      "Rye",
+      "lfe",
+      "hN",
+      "Sut",
+      "Eye"
     ]
   },
   "ranges": [

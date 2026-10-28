@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protojson"
+
 	agentv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/agent/v1"
 	aiserverv1 "github.com/exa-pub/grokbot-tunnel/internal/gen/aiserver/v1"
 	"github.com/exa-pub/grokbot-tunnel/internal/permission"
@@ -536,5 +538,32 @@ func TestShellOutputCap(t *testing.T) {
 	r := runShell(t, e, `head -c 2000000 /dev/zero | tr '\0' a; echo done >&2`)
 	if len(r.stdout) > maxStreamOutput || len(r.stdout) == 0 || strings.Trim(r.stdout, "a") != "" || r.stderr != "done\n" || r.exit.Code != 0 {
 		t.Fatalf("stdout %d bytes, stderr %q, exit %v", len(r.stdout), r.stderr, r.exit)
+	}
+}
+func TestUnrecognizedFrames(t *testing.T) {
+	e := setup(t)
+	e.Policy.Mode = permission.ModeNever // answered before any permission check
+	for _, f := range []*aiserverv1.GrokBotUserComputerRequestFrame{
+		{RequestId: "r"},
+		{RequestId: "r", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_PutFileToUrl{PutFileToUrl: &aiserverv1.GrokBotUserComputerPutFileToUrl{Path: "x", Url: "https://example.invalid/"}}},
+		{RequestId: "r", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_GetFileFromUrl{GetFileFromUrl: &aiserverv1.GrokBotUserComputerGetFileFromUrl{Path: "x", Url: "https://example.invalid/"}}},
+	} {
+		if !Unrecognized(f) {
+			t.Fatal("recognized", f)
+		}
+		frames := collect(t, e, f)
+		var msg agentv1.ExecClientControlMessage
+		if len(frames) != 1 || frames[0].GetControl() == nil || protojson.Unmarshal([]byte(frames[0].GetControl().MessageJson), &msg) != nil ||
+			msg.GetThrow().GetId() != 0 || msg.GetThrow().GetError() != ErrUnknownFrame.Error() {
+			t.Fatal(frames)
+		}
+	}
+	f := &aiserverv1.GrokBotUserComputerRequestFrame{RequestId: "r", Frame: &aiserverv1.GrokBotUserComputerRequestFrame_DiscoverAiTool{DiscoverAiTool: &aiserverv1.GrokBotUserComputerDiscoverAiTool{Source: "cursor"}}}
+	if frames := collect(t, e, f); !Unrecognized(f) || len(frames) != 1 || frames[0].GetFileError().GetError() != ErrUnknownFrame.Error() {
+		t.Fatal(frames)
+	}
+	f.GetDiscoverAiTool().Source = sourceCodex
+	if Unrecognized(f) || Unrecognized(execFrame(`{}`)) {
+		t.Fatal("known frame unrecognized")
 	}
 }

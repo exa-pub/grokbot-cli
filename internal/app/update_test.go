@@ -19,7 +19,7 @@ import (
 )
 
 func fakeBinary(version string) []byte {
-	return []byte("#!/bin/sh\necho 'grokbot-tunnel " + version + " (Sand protocol 0.77.0)'\n")
+	return []byte("#!/bin/sh\necho 'grokbot-tunnel " + version + " (Sand protocol 0.78.1)'\n")
 }
 
 // fakeReleases serves a repository whose latest release is v1.2.3.

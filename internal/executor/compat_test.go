@@ -46,7 +46,7 @@ func controlMessage(t *testing.T, f *aiserverv1.GrokBotUserComputerResponseFrame
 	return m
 }
 func TestReferenceRangesAndTerminalHeader(t *testing.T) {
-	b, err := os.ReadFile("../../testdata/compat/0.77.0/pure-functions.json")
+	b, err := os.ReadFile("../../testdata/compat/0.78.1/pure-functions.json")
 	if err != nil {
 		t.Fatal(err)
 	}

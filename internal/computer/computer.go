@@ -997,6 +997,13 @@ func (s *session) accept(f *requestFrame, server bool) {
 	case f.GetRetireApproval() != nil:
 	case s.tasks[f.RequestId] != nil || s.requests.has(f.RequestId):
 		// Already queued or running.
+	case executor.Unrecognized(f):
+		// Answered before admission, like the desktop's poll loop, which
+		// leaves a frame without a request id unanswered.
+		if f.RequestId != "" {
+			s.requests.add(f.RequestId)
+			s.reject(f, executor.ErrUnknownFrame)
+		}
 	case s.active >= maxActive && len(s.backlog) >= maxBacklog:
 		s.requests.add(f.RequestId)
 		s.reject(f, errBusy)
